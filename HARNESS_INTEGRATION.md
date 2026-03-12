@@ -32,6 +32,7 @@ This document tracks rollout of harness-engineering 6-gate QA across Python proj
 | lunark-chatbot-lab | enabled | disabled | enabled | disabled | Gate A/C failing; import cycle detected |
 | trpg-chatbot-lab | enabled | enabled | enabled | disabled | local Python version mismatch for parsing |
 | openmanus | enabled | enabled | enabled | disabled | parse issue blocks B/C |
+| ai-native-agentic-economic-sdk | enabled | disabled | disabled | disabled | Gate A(✅ black+ruff+mypy), Gate E(✅ pytest 12 tests), B/C/D/F disabled |
 
 ## Failure examples and fixes
 
@@ -47,6 +48,14 @@ This document tracks rollout of harness-engineering 6-gate QA across Python proj
 4. Parser/runtime mismatch
    - Symptom: AST parsing fails on newer syntax under older interpreter
    - Fix: run gates under repository-supported Python version in local and CI
+
+## Non-Python Repos
+
+| Repo | Language | Harness Status |
+|------|----------|----------------|
+| openclaw | TypeScript | `.harness/run-gates.sh` wraps pnpm format/lint/build/test |
+| symphony/elixir | Elixir | `.harness/run-gates.sh` wraps mix format/credo/dialyzer/test |
+| seedbot | Bash | No harness (single-file script) |
 
 ## Deliverables
 

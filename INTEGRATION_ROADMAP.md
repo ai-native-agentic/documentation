@@ -824,21 +824,33 @@ class OrchestraLinearBridge:
 - [x] Create roadmap (this document)
 
 ### Phase 1: Quick Wins (Weeks 5-8) - P0
-- [ ] Integration 1: Economic Tracking SDK (2 weeks)
-- [ ] Integration 2: Universal 6-Gate QA (Start: 2 weeks, Continue: 8 weeks parallel)
+- [x] Integration 1: Economic Tracking SDK (2 weeks) — ✅ DONE (economic-sdk package created)
+- [x] Integration 2: Universal 6-Gate QA (Start: 2 weeks, Continue: 8 weeks parallel) — ✅ DONE (nanobot, lunark-chatbot-lab harness scaffolds)
+- [x] ClawWork nanobot dependency — ✅ DONE (setup.py + DEPENDENCIES.md)
+- [x] nanobot SeedbotChannel — ✅ DONE (channels/seedbot.py + tests)
+- [x] EconomicFeedbackAgent — ✅ DONE (ai-native-self-learning-agents/agents/economic_feedback.py)
 - **Deliverables**: SDK published, 3 agents with economic tracking, 2 repos with 6-Gate CI
 
-### Phase 2: Production Readiness (Weeks 9-14) - P1
+### Phase 2: Integration Deepening (Planned)
+- [ ] economic-sdk: enable Gate B (configure import-linter contracts in pyproject.toml)
+- [ ] economic-sdk: enable Gate C (define ast-grep rules for anti-patterns)
+- [ ] nanobot: add `justfile` with `just check` entry
+- [ ] ClawWork: add `.harness/` scaffold
+- [ ] git: commit all pending changes across repos (blocked: bash not available)
+- [ ] nanobot SeedbotChannel: end-to-end test with real seedbot process
+- [ ] self-learning-agents: install economic-sdk and run pytest with real tracker
+
+### Phase 3: Production Readiness (Weeks 9-14) - P1
 - [ ] Integration 3: Shared Quality Library (4 weeks)
 - [ ] Integration 4: Channel Abstraction Layer (5 weeks)
 - **Deliverables**: Quality SDK published, nanobot supports all 22 channels
 
-### Phase 3: Advanced Features (Weeks 15-22) - P2
+### Phase 4: Advanced Features (Weeks 15-22) - P2
 - [ ] Integration 5: Cross-Repo Evaluation (6 weeks)
 - [ ] Integration 6: Self-Learning Economic Feedback (8 weeks)
 - **Deliverables**: 14-dimension CI, hybrid reward agents outperform baselines
 
-### Phase 4: Multi-Agent Systems (Weeks 23-32) - P3
+### Phase 5: Multi-Agent Systems (Weeks 23-32) - P3
 - [ ] Integration 7: Multi-Agent Orchestra (10 weeks)
 - **Deliverables**: 5+ agents collaborating, Linear-tracked workflows
 

@@ -1,2170 +1,504 @@
-# UC1: 자율 소프트웨어 팩토리 (Autonomous Software Factory)
+# UC1: 자율 소프트웨어 팩토리 (Autonomous Software Factory) 상세 설계서
 
-**Version:** 1.0.0  
-**Date:** 2026-03-10  
-**Status:** Implementation-Ready Specification  
-**Owner:** @zzragida  
+## 1. 개요 및 비전 (Overview & Vision)
 
----
+### 1.1 비전 (Vision)
+"자율 소프트웨어 팩토리"는 인간 개발자의 개입 없이 이슈 탐지, 코드 구현, 품질 검증, 그리고 배포까지의 전 과정을 AI 에이전트 군단이 자율적으로 수행하는 차세대 소프트웨어 생산 체계입니다. 본 프로젝트는 단순한 코드 생성을 넘어, 경제적 인센티브와 엄격한 품질 게이트(Quality Gates)를 결합하여 신뢰할 수 있는 소프트웨어를 지속적으로 생산하는 것을 목표로 합니다.
 
-## 1. Overview & Vision
-
-### 1.1 Executive Summary
-
-The Autonomous Software Factory transforms Linear issue tickets into production-ready code without human intervention. Symphony orchestrates agent workflows, Codex executes implementation tasks, Agenthub provides distributed version control and collaboration, and Harness Engineering enforces quality gates. The system operates as a continuous delivery pipeline where agents are first-class contributors.
-
-**Core Value Proposition:**
-- Zero-touch issue resolution for well-specified tickets
-- Mechanical quality enforcement (6-Gate QA)
-- Economic accountability (pay-per-merged-PR model)
-- Multi-agent collaboration with conflict resolution
-
-### 1.2 Success Criteria
-
-| Metric | Target | Measurement |
-|--------|--------|-------------|
-| PR merge rate | >60% auto-merged | GitHub API |
-| Time-to-merge | <4 hours (median) | Linear → GitHub timestamp delta |
-| Defect rate | <5% post-merge bugs | Issue reopens within 7 days |
-| Gate pass rate | >95% on first attempt | Harness logs |
-| Economic ROI | >300% (revenue vs. LLM cost) | Economic SDK ledger |
-
-### 1.3 Out of Scope (MVP)
-
-- Multi-repository coordination (single repo only)
-- Human code review integration (auto-merge only)
-- Custom gate definitions (6-Gate fixed)
-- Real-time collaboration UI (async only)
-- Cross-project dependency resolution
+### 1.2 핵심 가치 (Core Values)
+- **자율성 (Autonomy)**: Linear 이슈 생성부터 PR 머지까지의 과정에서 인간 개입 80% 감소.
+- **품질 보장 (Quality Assurance)**: 6-Gate QA 시스템을 통한 회귀 버그 제로화.
+- **경제적 효율성 (Economic Efficiency)**: 에이전트의 작업 가치를 정량화하고 ROI 기반의 리소스 할당.
+- **확장성 (Scalability)**: 새로운 에이전트와 도구를 플러그인 형태로 손쉽게 추가 가능한 아키텍처 구축.
 
 ---
 
-## 2. Architecture Diagram
+## 2. 아키텍처 다이어그램 (Architecture Diagram)
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         LINEAR (Issue Tracker)                   │
-│  Issues: {id, title, description, state, priority, labels}      │
-└────────────────┬────────────────────────────────────────────────┘
-                 │ Poll every 30s
-                 │ (GET /api/issues?filter=state:todo)
-                 ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    SYMPHONY (Orchestrator)                       │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │ Linear       │  │ Agent        │  │ Agenthub     │          │
-│  │ Poller       │─▶│ Runner       │─▶│ Client       │          │
-│  │ (GenServer)  │  │ (Task.async) │  │ (HTTP)       │          │
-│  └──────────────┘  └──────────────┘  └──────┬───────┘          │
-│         │                  │                 │                   │
-│         │                  ▼                 │                   │
-│         │          ┌──────────────┐          │                   │
-│         │          │ Harness      │          │                   │
-│         │          │ Runner       │          │                   │
-│         │          │ (Port)       │          │                   │
-│         │          └──────────────┘          │                   │
-│         │                  │                 │                   │
-└─────────┼──────────────────┼─────────────────┼───────────────────┘
-          │                  │                 │
-          │                  │                 ▼
-          │                  │    ┌─────────────────────────────┐
-          │                  │    │   AGENTHUB (Git DAG + MQ)   │
-          │                  │    │  ┌────────┐  ┌────────┐     │
-          │                  │    │  │ Git    │  │ Message│     │
-          │                  │    │  │ Bundle │  │ Board  │     │
-          │                  │    │  │ Store  │  │ (Posts)│     │
-          │                  │    │  └────────┘  └────────┘     │
-          │                  │    │  ┌────────────────────┐     │
-          │                  │    │  │ SQLite DB          │     │
-          │                  │    │  │ (agents, commits,  │     │
-          │                  │    │  │  channels, posts)  │     │
-          │                  │    │  └────────────────────┘     │
-          │                  │    └─────────────────────────────┘
-          │                  │                 │
-          │                  │                 │ POST /api/git/push
-          │                  │                 │ GET /api/git/fetch/{hash}
-          │                  │                 │ POST /api/channels/{name}/posts
-          │                  │                 │
-          ▼                  ▼                 ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    CODEX APP-SERVER (Agent)                      │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │ Conversation Loop:                                       │   │
-│  │  1. Read issue description                              │   │
-│  │  2. Plan implementation                                 │   │
-│  │  3. Execute (Read/Edit/Bash tools)                      │   │
-│  │  4. Self-verify (LSP diagnostics, tests)               │   │
-│  │  5. Push bundle to Agenthub                             │   │
-│  │  6. Trigger Harness gates                               │   │
-│  │  7. Report results to Symphony                          │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-          │
-          │ Shell subprocess
-          ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              HARNESS ENGINEERING (QA Gates)                      │
-│  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐   │
-│  │Gate 1│─▶│Gate 2│─▶│Gate 3│─▶│Gate 4│─▶│Gate 5│─▶│Gate 6│   │
-│  │Format│  │Import│  │AST   │  │Snap  │  │Tests │  │Equiv │   │
-│  └──────┘  └──────┘  └──────┘  └──────┘  └──────┘  └──────┘   │
-│     ▲                                                            │
-│     │ .harness/run-gates.sh                                     │
-│     │                                                            │
-└─────┼──────────────────────────────────────────────────────────┘
-      │
-      │ Exit code + JSON output
-      ▼
-┌─────────────────────────────────────────────────────────────────┐
-│          AI-NATIVE-AGENTIC-ECONOMIC-SDK (Ledger)                │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │ JSONL Ledger:                                            │   │
-│  │  - track_llm_call(model, tokens, cost)                  │   │
-│  │  - add_work_income(amount, task_id, eval_score)         │   │
-│  │  - Quality gate: payment only if score >= 0.6           │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+```text
++-----------------------------------------------------------------------+
+|                         Autonomous Software Factory                   |
++-----------------------------------------------------------------------+
+|                                                                       |
+|  +-------------------+       +-------------------+      +----------+  |
+|  |     Symphony      | <---> |      Linear       |      |  User    |  |
+|  | (Orchestrator)    |       | (Issue Tracker)   |      | Dashboard|  |
+|  +---------+---------+       +-------------------+      +----^-----+  |
+|            |                                                 |        |
+|            | 1. Poll Issues                                  |        |
+|            v                                                 |        |
+|  +---------+---------+       +-------------------+           |        |
+|  |   AgentRunner     | ----> |   Codex Server    |           |        |
+|  | (Lifecycle Mgmt)  |       | (LLM Execution)   |           |        |
+|  +---------+---------+       +---------+---------+           |        |
+|            |                           |                     |        |
+|            | 2. Execute RPEQ           | 3. Track Costs      |        |
+|            v                           v                     |        |
+|  +---------+---------+       +-------------------+           |        |
+|  | Harness-Eng       |       | Economic SDK      | <---------+        |
+|  | (6-Gate QA)       |       | (Ledger/Metrics)  |                    |
+|  +---------+---------+       +---------+---------+                    |
+|            |                           |                              |
+|            | 4. Push Bundle            | 5. Record Income             |
+|            v                           v                              |
+|  +-------------------------------------------------------+            |
+|  |                      Agenthub                         |            |
+|  | (Git DAG API / Message Board / Post-Push Gates)       |            |
+|  +-------------------------------------------------------+            |
+|                                                                       |
++-----------------------------------------------------------------------+
 ```
 
 ---
 
-## 3. Component Responsibilities
+## 3. 구성 요소별 역할 (Component Responsibilities)
 
-### 3.1 Symphony (Orchestrator)
+### 3.1 Symphony (`/home/lunark/projects/ai-native-agentic-org/symphony/`)
+- **역할**: 전체 워크플로우의 지휘자(Orchestrator).
+- **핵심 기능**:
+    - Linear API를 30초 주기로 폴링하여 신규 이슈 탐지.
+    - 이슈별로 독립된 `AgentRunner` 프로세스 할당.
+    - `WORKFLOW.md` 설정을 기반으로 에이전트 환경 구성.
+    - 에이전트 실행 전후의 Hook(Pre-run, Post-run) 실행.
+    - 에이전트 상태 모니터링 및 재시도 로직 관리.
 
-**Location:** `/home/lunark/projects/ai-native-agentic-org/symphony/`
+### 3.2 Agenthub (`/home/lunark/projects/ai-native-agentic-org/agenthub/`)
+- **역할**: 에이전트 전용 버전 관리 및 통신 허브.
+- **핵심 기능**:
+    - Git DAG 기반의 바이너리 번들 푸시/페치 API 제공.
+    - 에이전트 간 협업을 위한 메시지 보드(Channel/Post) 운영.
+    - 푸시된 코드에 대한 서버 측 Post-push QA 게이트 실행.
+    - 에이전트별 Bearer 토큰 인증 및 속도 제한(Rate Limiting).
+    - 커밋 이력 및 게이트 결과 영구 저장 (SQLite).
 
-**Responsibilities:**
-- Poll Linear API every 30 seconds for `state:todo` issues
-- Launch one Codex app-server per issue (isolated process)
-- Monitor agent progress via HTTP API (`GET /api/v1/state`)
-- Retry failed runs with exponential backoff (10s, 20s, 40s, 80s, 160s max)
-- Update Linear issue state on completion/failure
-- Coordinate with Agenthub for bundle push/fetch
-- Trigger Harness gates post-implementation
+### 3.3 Harness-Engineering (`/home/lunark/projects/ai-native-agentic-org/harness-engineering/`)
+- **역할**: 엄격한 품질 검증 엔진.
+- **핵심 기능**:
+    - **6-Gate QA 상세**:
+        1. **Gate 1: Format Gate**: `ruff format`, `oxfmt`, `mix format` 등을 사용하여 코드 스타일 통일성 검증.
+        2. **Gate 2: Import Boundaries**: 프로젝트 간 부적절한 참조 및 순환 의존성 탐지 (AST 분석).
+        3. **Gate 3: AST Ratchets**: 코드 복잡도(Cyclomatic Complexity) 및 금지된 패턴(`eval`, `exec`) 사용 제한.
+        4. **Gate 4: Snapshots**: UI 및 데이터 구조의 의도치 않은 변경을 방지하기 위한 스냅샷 비교.
+        5. **Gate 5: Tests**: 단위 테스트 및 통합 테스트 실행 (Pytest, Vitest, Mix Test).
+        6. **Gate 6: Equivalence**: 리팩토링 전후의 출력 결과 동일성 검증 (Differential Testing).
+    - **RPEQ 워크플로우**: Research → Plan → Execute → QA 단계 강제.
+    - `.harness/run-gates.sh`를 통한 자동화된 검증 스크립트 제공.
+    - AGENTS.md 준수 여부 확인 및 에이전트 메타데이터 검증.
 
-**Key Modules:**
-- `lib/symphony_elixir/linear/poller.ex` (GenServer, 30s interval)
-- `lib/symphony_elixir/agent_runner.ex` (Task.Supervisor for Codex processes)
-- `lib/symphony_elixir/agenthub/client.ex` (NEW: HTTP client for Agenthub)
-- `lib/symphony_elixir/harness/runner.ex` (NEW: Port wrapper for run-gates.sh)
-
-**Configuration:** `WORKFLOW.md` (YAML schema)
-
-### 3.2 Agenthub (Distributed VCS + Message Board)
-
-**Location:** `/home/lunark/projects/ai-native-agentic-org/agenthub/`
-
-**Responsibilities:**
-- Store git bundles as content-addressed blobs (SHA-256)
-- Provide DAG traversal API (leaves, ancestors, diff)
-- Message board for agent-to-agent communication
-- Rate limiting (60 pushes/hr, 60 posts/hr, 60 diffs/hr per agent)
-- Authentication via Bearer tokens
-- Post-push hook integration for Harness gates
-
-**Key Modules:**
-- `internal/git/bundle.go` (bundle storage, fetch, push)
-- `internal/api/git_handler.go` (HTTP endpoints)
-- `internal/api/channel_handler.go` (message board)
-- `internal/db/sqlite.go` (agents, commits, channels, posts, rate_limits)
-- `internal/harness/runner.go` (NEW: post-push gate execution)
-
-**Database Schema:**
-```sql
-CREATE TABLE agents (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    api_key TEXT NOT NULL UNIQUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE commits (
-    hash TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL,
-    parent_hash TEXT,
-    bundle_path TEXT NOT NULL,
-    message TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (agent_id) REFERENCES agents(id)
-);
-
-CREATE TABLE gate_results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    commit_hash TEXT NOT NULL,
-    gate_name TEXT NOT NULL,
-    status TEXT NOT NULL, -- pass/fail/skip
-    output TEXT,
-    duration_ms INTEGER,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (commit_hash) REFERENCES commits(hash)
-);
-
-CREATE TABLE channels (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE posts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel_id INTEGER NOT NULL,
-    agent_id TEXT NOT NULL,
-    content TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (channel_id) REFERENCES channels(id),
-    FOREIGN KEY (agent_id) REFERENCES agents(id)
-);
-
-CREATE TABLE rate_limits (
-    agent_id TEXT NOT NULL,
-    action TEXT NOT NULL, -- push/post/diff
-    count INTEGER DEFAULT 0,
-    window_start TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (agent_id, action)
-);
-```
-
-### 3.3 Harness Engineering (QA Gates)
-
-**Location:** `/home/lunark/projects/ai-native-agentic-org/harness-engineering/`
-
-**Responsibilities:**
-- Execute 6-Gate QA pipeline in sequence
-- Fail fast on first gate failure (unless `--continue-on-error`)
-- Generate JSON report with per-gate status
-- Validate AGENTS.md compliance
-- Enforce RPEQ workflow (Research → Plan → Execute → QA)
-
-**6-Gate Pipeline:**
-1. **Format Gate:** `ruff format --check`, `oxfmt --check`, `mix format --check-formatted`
-2. **Import Boundaries:** AST analysis for cross-experiment imports (Python), circular deps (TS)
-3. **AST Ratchets:** Complexity metrics (cyclomatic, cognitive), forbidden patterns (`eval`, `exec`)
-4. **Snapshots:** Vitest snapshots (TS), pytest snapshot tests (Python)
-5. **Tests:** `pytest -m "not slow"`, `vitest run`, `mix test`
-6. **Equivalence:** Differential testing (compare outputs before/after refactor)
-
-**Key Scripts:**
-- `.harness/run-gates.sh` (entry point, calls gate-*.sh)
-- `scripts/gate-1-format.sh`
-- `scripts/gate-2-import-boundaries.sh`
-- `scripts/gate-3-ast-ratchets.sh`
-- `scripts/gate-4-snapshots.sh`
-- `scripts/gate-5-tests.sh`
-- `scripts/gate-6-equivalence.sh`
-- `scripts/validate-agents-md.sh`
-
-**Output Format (JSON):**
-```json
-{
-  "gates": [
-    {"name": "format", "status": "pass", "duration_ms": 1234, "output": ""},
-    {"name": "import_boundaries", "status": "pass", "duration_ms": 567, "output": ""},
-    {"name": "ast_ratchets", "status": "fail", "duration_ms": 890, "output": "Cyclomatic complexity 15 > 10 in foo.py:42"},
-    {"name": "snapshots", "status": "skip", "duration_ms": 0, "output": "No snapshot tests found"},
-    {"name": "tests", "status": "skip", "duration_ms": 0, "output": "Skipped due to previous failure"},
-    {"name": "equivalence", "status": "skip", "duration_ms": 0, "output": "Skipped due to previous failure"}
-  ],
-  "overall": "fail",
-  "total_duration_ms": 2691
-}
-```
-
-### 3.4 AI-Native-Agentic-Economic-SDK (Ledger)
-
-**Location:** `/home/lunark/projects/ai-native-agentic-org/ai-native-agentic-economic-sdk/`
-
-**Responsibilities:**
-- Track LLM API costs (model, tokens, USD)
-- Record work income (task completion, evaluation score)
-- Enforce quality gate: payment only if `evaluation_score >= 0.6`
-- Generate daily/weekly economic reports
-- Compute sustainability metrics (ROI, pay rate, burn rate)
-
-**Key Classes:**
-- `EconomicTracker` (main API)
-- `LedgerEntry` (dataclass: timestamp, type, amount, metadata)
-- `QualityGate` (evaluation score threshold)
-- `MetricsCalculator` (ROI, pay rate, sustainability score)
-
-**Ledger Format (JSONL):**
-```jsonl
-{"timestamp": "2026-03-10T10:30:00Z", "type": "llm_call", "amount": -0.05, "metadata": {"model": "claude-sonnet-4-5", "tokens": 2500}}
-{"timestamp": "2026-03-10T11:45:00Z", "type": "work_income", "amount": 2.00, "metadata": {"task_id": "LIN-123", "evaluation_score": 0.85}}
-{"timestamp": "2026-03-10T12:00:00Z", "type": "work_income", "amount": 0.00, "metadata": {"task_id": "LIN-124", "evaluation_score": 0.45, "rejected": true}}
-```
-
-**Integration Points:**
-- Symphony calls `tracker.track_llm_call()` after each Codex run
-- Symphony calls `tracker.add_work_income()` after PR merge (evaluation score from Harness gates)
+### 3.4 Economic SDK (`/home/lunark/projects/ai-native-agentic-org/ai-native-agentic-economic-sdk/`)
+- **역할**: 에이전트 경제 시스템 관리.
+- **핵심 기능**:
+    - LLM API 호출 비용 실시간 트래킹 (`track_llm_call`).
+    - 작업 완료 시 품질 점수에 따른 수익 기록 (`add_work_income`).
+    - 일일 요약 및 ROI 분석 보고서 생성.
+    - JSONL 기반의 불변 원장(Ledger) 관리.
+    - 품질 점수 0.6 미만 시 지급 거절 로직 포함.
 
 ---
 
-## 4. Integration Points (Exact APIs)
+## 4. 연동 포인트 (Integration Points)
 
 ### 4.1 Symphony ↔ Linear
+- **Protocol**: HTTPS / GraphQL
+- **Endpoint**: `https://api.linear.app/graphql`
+- **Action**: `GET` issues with state "Todo" or "Backlog".
+- **Auth**: Bearer Token (Linear API Key).
 
-**Endpoint:** `https://api.linear.app/graphql`
+### 4.2 Symphony ↔ Agenthub
+- **Protocol**: HTTP / Binary (Bundle) & JSON (Messages)
+- **Endpoints**:
+    - `POST /api/git/push`: 코드 번들 업로드.
+    - `GET /api/git/fetch/{hash}`: 특정 버전 코드 다운로드.
+    - `GET /api/git/leaves`: 최신 커밋 목록 조회.
+    - `POST /api/channels/{name}/posts`: 작업 로그 기록.
 
-**Authentication:** Bearer token in `Authorization` header
+### 4.3 Symphony ↔ Harness
+- **Protocol**: Local Subprocess (Port)
+- **Action**: `bash .harness/run-gates.sh` 실행 및 JSON 결과 파싱.
 
-**Query (Poll Issues):**
-```graphql
-query GetTodoIssues {
-  issues(filter: {state: {name: {eq: "Todo"}}}) {
-    nodes {
-      id
-      identifier
-      title
-      description
-      state {
-        name
-      }
-      priority
-      labels {
-        nodes {
-          name
-        }
-      }
-      createdAt
-      updatedAt
-    }
-  }
-}
-```
-
-**Mutation (Update Issue State):**
-```graphql
-mutation UpdateIssueState($issueId: String!, $stateId: String!) {
-  issueUpdate(id: $issueId, input: {stateId: $stateId}) {
-    success
-    issue {
-      id
-      state {
-        name
-      }
-    }
-  }
-}
-```
-
-**Configuration (WORKFLOW.md):**
-```yaml
-tracker:
-  type: linear
-  api_key: $LINEAR_API_KEY
-  team_id: $LINEAR_TEAM_ID
-  polling_interval_ms: 30000
-  states:
-    todo: "Todo"
-    in_progress: "In Progress"
-    done: "Done"
-    failed: "Failed"
-```
-
-### 4.2 Symphony ↔ Codex App-Server
-
-**Launch Command:**
-```bash
-codex app-server \
-  --port 8081 \
-  --cwd /path/to/workspace \
-  --base-instructions "You are an autonomous agent. Implement the issue described below. Push your changes to Agenthub when done." \
-  --developer-instructions "Issue: ${issue_title}\n\n${issue_description}" \
-  --approval-policy never \
-  --sandbox workspace-write
-```
-
-**State Monitoring (HTTP):**
-```bash
-GET http://localhost:8081/api/v1/state
-```
-
-**Response:**
-```json
-{
-  "status": "running",
-  "conversation_id": "conv_abc123",
-  "message_count": 15,
-  "last_activity": "2026-03-10T10:45:00Z",
-  "workspace": "/path/to/workspace"
-}
-```
-
-**Completion Detection:**
-- Poll `/api/v1/state` every 5 seconds
-- Status transitions: `running` → `completed` or `failed`
-- Timeout: 30 minutes (configurable)
-
-### 4.3 Symphony ↔ Agenthub
-
-**Base URL:** `http://localhost:8080` (configurable)
-
-**Authentication:** `Authorization: Bearer ${AGENTHUB_API_KEY}`
-
-**Push Bundle:**
-```bash
-POST /api/git/push
-Content-Type: application/octet-stream
-Body: <git bundle binary data>
-
-Response:
-{
-  "hash": "a1b2c3d4e5f6...",
-  "parent_hash": "f6e5d4c3b2a1...",
-  "agent_id": "symphony-agent-1",
-  "created_at": "2026-03-10T10:50:00Z"
-}
-```
-
-**Fetch Bundle:**
-```bash
-GET /api/git/fetch/a1b2c3d4e5f6
-
-Response: <git bundle binary data>
-```
-
-**Get DAG Leaves:**
-```bash
-GET /api/git/leaves
-
-Response:
-{
-  "leaves": [
-    {"hash": "a1b2c3d4e5f6", "agent_id": "symphony-agent-1", "created_at": "2026-03-10T10:50:00Z"},
-    {"hash": "b2c3d4e5f6a1", "agent_id": "symphony-agent-2", "created_at": "2026-03-10T10:55:00Z"}
-  ]
-}
-```
-
-**Get Diff:**
-```bash
-GET /api/git/diff/f6e5d4c3b2a1/a1b2c3d4e5f6
-
-Response:
-{
-  "from": "f6e5d4c3b2a1",
-  "to": "a1b2c3d4e5f6",
-  "diff": "diff --git a/foo.py b/foo.py\nindex 1234567..abcdefg 100644\n--- a/foo.py\n+++ b/foo.py\n@@ -10,3 +10,4 @@\n def bar():\n-    pass\n+    return 42\n"
-}
-```
-
-**Post Message:**
-```bash
-POST /api/channels/symphony-logs/posts
-Content-Type: application/json
-
-{
-  "content": "Agent symphony-agent-1 completed issue LIN-123 in 15 minutes"
-}
-
-Response:
-{
-  "id": 42,
-  "channel_id": 1,
-  "agent_id": "symphony-agent-1",
-  "content": "Agent symphony-agent-1 completed issue LIN-123 in 15 minutes",
-  "created_at": "2026-03-10T11:00:00Z"
-}
-```
-
-**Rate Limits (HTTP Headers):**
-```
-X-RateLimit-Limit: 60
-X-RateLimit-Remaining: 45
-X-RateLimit-Reset: 1678451200
-```
-
-### 4.4 Symphony ↔ Harness Engineering
-
-**Execution (Shell Subprocess):**
-```bash
-cd /path/to/workspace
-/home/lunark/projects/ai-native-agentic-org/harness-engineering/.harness/run-gates.sh \
-  --project-root . \
-  --output-format json \
-  --fail-fast
-```
-
-**Exit Codes:**
-- `0`: All gates passed
-- `1`: One or more gates failed
-- `2`: Script error (missing dependencies, invalid config)
-
-**Output (stdout, JSON):**
-```json
-{
-  "gates": [
-    {"name": "format", "status": "pass", "duration_ms": 1234, "output": ""},
-    {"name": "import_boundaries", "status": "pass", "duration_ms": 567, "output": ""},
-    {"name": "ast_ratchets", "status": "pass", "duration_ms": 890, "output": ""},
-    {"name": "snapshots", "status": "pass", "duration_ms": 456, "output": ""},
-    {"name": "tests", "status": "pass", "duration_ms": 12345, "output": "42 passed in 12.34s"},
-    {"name": "equivalence", "status": "pass", "duration_ms": 3456, "output": ""}
-  ],
-  "overall": "pass",
-  "total_duration_ms": 18948
-}
-```
-
-### 4.5 Agenthub ↔ Harness Engineering
-
-**Post-Push Hook (Internal):**
-
-When Agenthub receives a bundle push, it triggers Harness gates:
-
-```go
-// internal/harness/runner.go
-func RunGatesForCommit(commitHash string, workspaceDir string) (*GateResults, error) {
-    cmd := exec.Command(
-        "/home/lunark/projects/ai-native-agentic-org/harness-engineering/.harness/run-gates.sh",
-        "--project-root", workspaceDir,
-        "--output-format", "json",
-        "--fail-fast",
-    )
-    
-    output, err := cmd.CombinedOutput()
-    if err != nil {
-        return nil, fmt.Errorf("gates failed: %w", err)
-    }
-    
-    var results GateResults
-    if err := json.Unmarshal(output, &results); err != nil {
-        return nil, fmt.Errorf("failed to parse gate results: %w", err)
-    }
-    
-    // Store results in DB
-    for _, gate := range results.Gates {
-        db.Exec(`
-            INSERT INTO gate_results (commit_hash, gate_name, status, output, duration_ms)
-            VALUES (?, ?, ?, ?, ?)
-        `, commitHash, gate.Name, gate.Status, gate.Output, gate.DurationMs)
-    }
-    
-    return &results, nil
-}
-```
-
-**Query Gate Results:**
-```bash
-GET /api/git/commits/a1b2c3d4e5f6/gates
-
-Response:
-{
-  "commit_hash": "a1b2c3d4e5f6",
-  "gates": [
-    {"name": "format", "status": "pass", "duration_ms": 1234, "output": ""},
-    {"name": "import_boundaries", "status": "pass", "duration_ms": 567, "output": ""},
-    {"name": "ast_ratchets", "status": "pass", "duration_ms": 890, "output": ""},
-    {"name": "snapshots", "status": "pass", "duration_ms": 456, "output": ""},
-    {"name": "tests", "status": "pass", "duration_ms": 12345, "output": "42 passed in 12.34s"},
-    {"name": "equivalence", "status": "pass", "duration_ms": 3456, "output": ""}
-  ],
-  "overall": "pass",
-  "created_at": "2026-03-10T11:05:00Z"
-}
-```
+### 4.4 Symphony ↔ Economic SDK
+- **Protocol**: Python Library / CLI
+- **Action**: `EconomicTracker` 인스턴스를 통한 비용 및 수익 기록.
+- **Storage**: `/var/lib/symphony/economic-ledger.jsonl`.
 
 ---
 
-## 5. Glue Code Specification
+## 5. 연동 코드 명세 (Glue Code Specification)
 
-### 5.1 Symphony: Agenthub Client (Elixir)
-
-**File:** `/home/lunark/projects/ai-native-agentic-org/symphony/lib/symphony_elixir/agenthub/client.ex`
+### 5.1 `SymphonyElixir.Agenthub.Client` (Elixir)
+Symphony에서 Agenthub API를 호출하기 위한 클라이언트 모듈입니다.
 
 ```elixir
 defmodule SymphonyElixir.Agenthub.Client do
   @moduledoc """
-  HTTP client for Agenthub API.
-  Handles bundle push/fetch, message board, and rate limiting.
+  Agenthub API와 상호작용하기 위한 HTTP 클라이언트입니다.
+  경로: /home/lunark/projects/ai-native-agentic-org/symphony/lib/symphony_elixir/agenthub/client.ex
   """
-
+  use HTTPoison.Base
   require Logger
 
-  @type bundle :: binary()
-  @type commit_hash :: String.t()
-  @type error :: {:error, String.t()}
+  defp endpoint, do: Application.get_env(:symphony, :agenthub_url, "http://localhost:8080")
+  defp api_key, do: System.get_env("AGENTHUB_API_KEY")
 
-  @doc """
-  Push a git bundle to Agenthub.
-  
-  ## Parameters
-  - bundle: Binary git bundle data
-  - parent_hash: Optional parent commit hash
-  
-  ## Returns
-  - {:ok, commit_hash} on success
-  - {:error, reason} on failure
-  """
-  @spec push_bundle(bundle(), String.t() | nil) :: {:ok, commit_hash()} | error()
-  def push_bundle(bundle, parent_hash \\ nil) do
-    url = "#{base_url()}/api/git/push"
+  def push_bundle(agent_id, bundle_path, parent_hash \\ nil) do
+    url = "#{endpoint()}/api/git/push"
+    body = File.read!(bundle_path)
     headers = [
       {"Authorization", "Bearer #{api_key()}"},
-      {"Content-Type", "application/octet-stream"},
-      {"X-Parent-Hash", parent_hash || ""}
+      {"X-Agent-ID", agent_id},
+      {"X-Parent-Hash", parent_hash || ""},
+      {"Content-Type", "application/octet-stream"}
     ]
-
-    case HTTPoison.post(url, bundle, headers, timeout: 60_000, recv_timeout: 60_000) do
+    case post(url, body, headers, [timeout: 60_000, recv_timeout: 60_000]) do
       {:ok, %{status_code: 200, body: body}} ->
-        case Jason.decode(body) do
-          {:ok, %{"hash" => hash}} ->
-            Logger.info("Pushed bundle to Agenthub: #{hash}")
-            {:ok, hash}
-
-          {:error, reason} ->
-            {:error, "Failed to parse response: #{inspect(reason)}"}
-        end
-
-      {:ok, %{status_code: 429}} ->
-        {:error, "Rate limit exceeded"}
-
-      {:ok, %{status_code: status, body: body}} ->
-        {:error, "HTTP #{status}: #{body}"}
-
-      {:error, %HTTPoison.Error{reason: reason}} ->
-        {:error, "HTTP request failed: #{inspect(reason)}"}
+        {:ok, Jason.decode!(body)}
+      {:ok, %{status_code: code, body: body}} ->
+        {:error, "HTTP #{code}: #{body}"}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  @doc """
-  Fetch a git bundle from Agenthub by commit hash.
-  
-  ## Parameters
-  - hash: Commit hash to fetch
-  
-  ## Returns
-  - {:ok, bundle} on success
-  - {:error, reason} on failure
-  """
-  @spec fetch_bundle(commit_hash()) :: {:ok, bundle()} | error()
-  def fetch_bundle(hash) do
-    url = "#{base_url()}/api/git/fetch/#{hash}"
-    headers = [{"Authorization", "Bearer #{api_key()}"}]
-
-    case HTTPoison.get(url, headers, timeout: 60_000, recv_timeout: 60_000) do
-      {:ok, %{status_code: 200, body: body}} ->
-        Logger.info("Fetched bundle from Agenthub: #{hash}")
-        {:ok, body}
-
-      {:ok, %{status_code: 404}} ->
-        {:error, "Bundle not found: #{hash}"}
-
-      {:ok, %{status_code: status, body: body}} ->
-        {:error, "HTTP #{status}: #{body}"}
-
-      {:error, %HTTPoison.Error{reason: reason}} ->
-        {:error, "HTTP request failed: #{inspect(reason)}"}
-    end
-  end
-
-  @doc """
-  Get DAG leaves (commits with no children).
-  
-  ## Returns
-  - {:ok, leaves} on success (list of %{hash, agent_id, created_at})
-  - {:error, reason} on failure
-  """
-  @spec get_leaves() :: {:ok, list(map())} | error()
-  def get_leaves do
-    url = "#{base_url()}/api/git/leaves"
-    headers = [{"Authorization", "Bearer #{api_key()}"}]
-
-    case HTTPoison.get(url, headers) do
-      {:ok, %{status_code: 200, body: body}} ->
-        case Jason.decode(body) do
-          {:ok, %{"leaves" => leaves}} -> {:ok, leaves}
-          {:error, reason} -> {:error, "Failed to parse response: #{inspect(reason)}"}
-        end
-
-      {:ok, %{status_code: status, body: body}} ->
-        {:error, "HTTP #{status}: #{body}"}
-
-      {:error, %HTTPoison.Error{reason: reason}} ->
-        {:error, "HTTP request failed: #{inspect(reason)}"}
-    end
-  end
-
-  @doc """
-  Get diff between two commits.
-  
-  ## Parameters
-  - from_hash: Starting commit hash
-  - to_hash: Ending commit hash
-  
-  ## Returns
-  - {:ok, diff_text} on success
-  - {:error, reason} on failure
-  """
-  @spec get_diff(commit_hash(), commit_hash()) :: {:ok, String.t()} | error()
-  def get_diff(from_hash, to_hash) do
-    url = "#{base_url()}/api/git/diff/#{from_hash}/#{to_hash}"
-    headers = [{"Authorization", "Bearer #{api_key()}"}]
-
-    case HTTPoison.get(url, headers) do
-      {:ok, %{status_code: 200, body: body}} ->
-        case Jason.decode(body) do
-          {:ok, %{"diff" => diff}} -> {:ok, diff}
-          {:error, reason} -> {:error, "Failed to parse response: #{inspect(reason)}"}
-        end
-
-      {:ok, %{status_code: 429}} ->
-        {:error, "Rate limit exceeded (60 diffs/hour)"}
-
-      {:ok, %{status_code: status, body: body}} ->
-        {:error, "HTTP #{status}: #{body}"}
-
-      {:error, %HTTPoison.Error{reason: reason}} ->
-        {:error, "HTTP request failed: #{inspect(reason)}"}
-    end
-  end
-
-  @doc """
-  Post a message to a channel.
-  
-  ## Parameters
-  - channel_name: Channel name (created if doesn't exist)
-  - content: Message content
-  
-  ## Returns
-  - {:ok, post_id} on success
-  - {:error, reason} on failure
-  """
-  @spec post_message(String.t(), String.t()) :: {:ok, integer()} | error()
-  def post_message(channel_name, content) do
-    url = "#{base_url()}/api/channels/#{channel_name}/posts"
+  def post_message(channel, author, content) do
+    url = "#{endpoint()}/api/channels/#{channel}/posts"
+    body = Jason.encode!(%{author: author, content: content})
     headers = [
       {"Authorization", "Bearer #{api_key()}"},
       {"Content-Type", "application/json"}
     ]
-    body = Jason.encode!(%{content: content})
-
-    case HTTPoison.post(url, body, headers) do
-      {:ok, %{status_code: 200, body: response_body}} ->
-        case Jason.decode(response_body) do
-          {:ok, %{"id" => id}} ->
-            Logger.info("Posted message to channel #{channel_name}: #{id}")
-            {:ok, id}
-
-          {:error, reason} ->
-            {:error, "Failed to parse response: #{inspect(reason)}"}
-        end
-
-      {:ok, %{status_code: 429}} ->
-        {:error, "Rate limit exceeded (60 posts/hour)"}
-
-      {:ok, %{status_code: status, body: response_body}} ->
-        {:error, "HTTP #{status}: #{response_body}"}
-
-      {:error, %HTTPoison.Error{reason: reason}} ->
-        {:error, "HTTP request failed: #{inspect(reason)}"}
-    end
-  end
-
-  # Private helpers
-
-  defp base_url do
-    Application.get_env(:symphony_elixir, :agenthub_url, "http://localhost:8080")
-  end
-
-  defp api_key do
-    System.get_env("AGENTHUB_API_KEY") ||
-      raise "AGENTHUB_API_KEY environment variable not set"
+    post(url, body, headers)
   end
 end
 ```
 
-### 5.2 Symphony: Harness Runner (Elixir)
-
-**File:** `/home/lunark/projects/ai-native-agentic-org/symphony/lib/symphony_elixir/harness/runner.ex`
+### 5.2 `SymphonyElixir.Harness.Runner` (Elixir)
+Symphony에서 Harness QA 게이트를 실행하기 위한 래퍼 모듈입니다.
 
 ```elixir
 defmodule SymphonyElixir.Harness.Runner do
   @moduledoc """
-  Subprocess wrapper for Harness Engineering 6-Gate QA.
-  Executes run-gates.sh and parses JSON results.
+  Harness QA 게이트를 실행하고 결과를 파싱합니다.
+  경로: /home/lunark/projects/ai-native-agentic-org/symphony/lib/symphony_elixir/harness/runner.ex
   """
-
   require Logger
 
-  @type gate_result :: %{
-          name: String.t(),
-          status: String.t(),
-          duration_ms: integer(),
-          output: String.t()
-        }
-
-  @type gate_results :: %{
-          gates: list(gate_result()),
-          overall: String.t(),
-          total_duration_ms: integer()
-        }
-
-  @type error :: {:error, String.t()}
-
-  @doc """
-  Run Harness 6-Gate QA on a workspace.
-  
-  ## Parameters
-  - workspace_dir: Absolute path to project workspace
-  - opts: Options map
-    - fail_fast: Stop on first gate failure (default: true)
-    - timeout_ms: Maximum execution time (default: 600_000 = 10 minutes)
-  
-  ## Returns
-  - {:ok, gate_results} on success (even if gates fail)
-  - {:error, reason} on script error
-  """
-  @spec run_gates(String.t(), map()) :: {:ok, gate_results()} | error()
-  def run_gates(workspace_dir, opts \\ %{}) do
-    fail_fast = Map.get(opts, :fail_fast, true)
-    timeout_ms = Map.get(opts, :timeout_ms, 600_000)
-
-    script_path = harness_script_path()
-    args = [
-      "--project-root",
-      workspace_dir,
-      "--output-format",
-      "json"
-    ]
-
-    args = if fail_fast, do: args ++ ["--fail-fast"], else: args
-
-    Logger.info("Running Harness gates: #{script_path} #{Enum.join(args, " ")}")
-
-    case System.cmd(script_path, args,
-           stderr_to_stdout: true,
-           cd: workspace_dir,
-           env: [{"PATH", System.get_env("PATH")}],
-           timeout: timeout_ms
-         ) do
+  def run_gates(project_path, harness_path) do
+    script_path = Path.join(harness_path, ".harness/run-gates.sh")
+    args = ["--project-root", project_path, "--output-format", "json"]
+    
+    case System.cmd("bash", [script_path | args], cd: project_path, stderr_to_stdout: true) do
       {output, 0} ->
-        parse_results(output)
-
-      {output, 1} ->
-        # Gates failed, but script succeeded
-        parse_results(output)
-
-      {output, exit_code} ->
-        Logger.error("Harness script error (exit #{exit_code}): #{output}")
-        {:error, "Script exited with code #{exit_code}: #{output}"}
+        {:ok, parse_json_output(output)}
+      {output, _exit_code} ->
+        {:error, parse_json_output(output)}
     end
-  rescue
-    e in ErlangError ->
-      if e.original == :timeout do
-        {:error, "Harness gates timed out"}
-      else
-        {:error, "Unexpected error: #{inspect(e)}"}
-      end
   end
 
-  @doc """
-  Parse JSON output from run-gates.sh.
-  
-  ## Parameters
-  - output: Raw stdout from script
-  
-  ## Returns
-  - {:ok, gate_results} on success
-  - {:error, reason} on parse failure
-  """
-  @spec parse_results(String.t()) :: {:ok, gate_results()} | error()
-  def parse_results(output) do
+  defp parse_json_output(output) do
     case Jason.decode(output) do
-      {:ok, %{"gates" => gates, "overall" => overall, "total_duration_ms" => duration}} ->
-        results = %{
-          gates:
-            Enum.map(gates, fn gate ->
-              %{
-                name: gate["name"],
-                status: gate["status"],
-                duration_ms: gate["duration_ms"],
-                output: gate["output"]
-              }
-            end),
-          overall: overall,
-          total_duration_ms: duration
+      {:ok, json} -> json
+      {:error, _} -> 
+        # JSON 파싱 실패 시 텍스트 기반 파싱 시도
+        %{
+          "overall" => "fail",
+          "output" => output,
+          "gates" => []
         }
-
-        Logger.info("Harness gates completed: #{overall} (#{duration}ms)")
-        {:ok, results}
-
-      {:ok, _} ->
-        {:error, "Invalid JSON structure: missing required fields"}
-
-      {:error, reason} ->
-        {:error, "Failed to parse JSON: #{inspect(reason)}"}
     end
-  end
-
-  # Private helpers
-
-  defp harness_script_path do
-    Application.get_env(
-      :symphony_elixir,
-      :harness_script_path,
-      "/home/lunark/projects/ai-native-agentic-org/harness-engineering/.harness/run-gates.sh"
-    )
   end
 end
 ```
 
-### 5.3 Symphony: Agent Runner Integration (Elixir)
-
-**File:** `/home/lunark/projects/ai-native-agentic-org/symphony/lib/symphony_elixir/agent_runner.ex` (MODIFIED)
-
-Add Agenthub push and Harness gate execution after Codex completion:
-
-```elixir
-defmodule SymphonyElixir.AgentRunner do
-  # ... existing code ...
-
-  alias SymphonyElixir.Agenthub.Client, as: AgenthubClient
-  alias SymphonyElixir.Harness.Runner, as: HarnessRunner
-
-  @doc """
-  Run agent for a Linear issue.
-  
-  ## Workflow
-  1. Launch Codex app-server
-  2. Monitor until completion
-  3. Create git bundle
-  4. Push to Agenthub
-  5. Run Harness gates
-  6. Update Linear issue state
-  7. Track economics
-  """
-  def run_for_issue(issue) do
-    Logger.info("Starting agent for issue #{issue.identifier}")
-
-    workspace_dir = prepare_workspace(issue)
-    codex_port = launch_codex(issue, workspace_dir)
-
-    # Monitor Codex until completion
-    case monitor_codex(codex_port, timeout_ms: 1_800_000) do
-      {:ok, :completed} ->
-        Logger.info("Codex completed for issue #{issue.identifier}")
-
-        # Create git bundle
-        case create_bundle(workspace_dir) do
-          {:ok, bundle} ->
-            # Push to Agenthub
-            case AgenthubClient.push_bundle(bundle) do
-              {:ok, commit_hash} ->
-                Logger.info("Pushed bundle: #{commit_hash}")
-
-                # Run Harness gates
-                case HarnessRunner.run_gates(workspace_dir) do
-                  {:ok, %{overall: "pass"} = results} ->
-                    Logger.info("All gates passed")
-
-                    # Update Linear issue to Done
-                    update_linear_issue(issue.id, "Done")
-
-                    # Track economics (payment only if gates pass)
-                    track_work_income(issue, evaluation_score: 1.0)
-
-                    # Post success message
-                    AgenthubClient.post_message(
-                      "symphony-logs",
-                      "✓ Issue #{issue.identifier} completed: #{commit_hash}"
-                    )
-
-                    {:ok, :completed, commit_hash, results}
-
-                  {:ok, %{overall: "fail"} = results} ->
-                    Logger.warn("Gates failed for issue #{issue.identifier}")
-
-                    # Update Linear issue to Failed
-                    update_linear_issue(issue.id, "Failed")
-
-                    # No payment for failed gates
-                    track_work_income(issue, evaluation_score: 0.0)
-
-                    # Post failure message
-                    AgenthubClient.post_message(
-                      "symphony-logs",
-                      "✗ Issue #{issue.identifier} failed gates: #{commit_hash}"
-                    )
-
-                    {:error, :gates_failed, results}
-
-                  {:error, reason} ->
-                    Logger.error("Harness error: #{reason}")
-                    update_linear_issue(issue.id, "Failed")
-                    {:error, :harness_error, reason}
-                end
-
-              {:error, reason} ->
-                Logger.error("Agenthub push failed: #{reason}")
-                update_linear_issue(issue.id, "Failed")
-                {:error, :push_failed, reason}
-            end
-
-          {:error, reason} ->
-            Logger.error("Bundle creation failed: #{reason}")
-            update_linear_issue(issue.id, "Failed")
-            {:error, :bundle_failed, reason}
-        end
-
-      {:error, :timeout} ->
-        Logger.error("Codex timed out for issue #{issue.identifier}")
-        update_linear_issue(issue.id, "Failed")
-        {:error, :timeout}
-
-      {:error, reason} ->
-        Logger.error("Codex failed: #{reason}")
-        update_linear_issue(issue.id, "Failed")
-        {:error, :codex_failed, reason}
-    end
-  end
-
-  defp create_bundle(workspace_dir) do
-    bundle_path = Path.join(System.tmp_dir!(), "bundle-#{:rand.uniform(999999)}.bundle")
-
-    case System.cmd("git", ["bundle", "create", bundle_path, "HEAD"],
-           cd: workspace_dir,
-           stderr_to_stdout: true
-         ) do
-      {_output, 0} ->
-        bundle = File.read!(bundle_path)
-        File.rm!(bundle_path)
-        {:ok, bundle}
-
-      {output, exit_code} ->
-        {:error, "git bundle failed (exit #{exit_code}): #{output}"}
-    end
-  end
-
-  defp track_work_income(issue, opts) do
-    evaluation_score = Keyword.get(opts, :evaluation_score, 0.0)
-
-    # Calculate payment based on issue priority
-    amount =
-      case issue.priority do
-        1 -> 5.0  # Urgent
-        2 -> 3.0  # High
-        3 -> 2.0  # Medium
-        4 -> 1.0  # Low
-        _ -> 0.5  # No priority
-      end
-
-    # Economic SDK integration (lazy import)
-    try do
-      tracker = EconomicTracker.new()
-
-      EconomicTracker.add_work_income(tracker, amount,
-        task_id: issue.identifier,
-        evaluation_score: evaluation_score
-      )
-
-      Logger.info("Tracked work income: $#{amount} (score: #{evaluation_score})")
-    rescue
-      _ -> Logger.warn("Economic SDK not available, skipping income tracking")
-    end
-  end
-
-  # ... rest of existing code ...
-end
-```
-
-### 5.4 Agenthub: Harness Integration (Go)
-
-**File:** `/home/lunark/projects/ai-native-agentic-org/agenthub/internal/harness/runner.go` (NEW)
+### 5.3 `agenthub/internal/harness/runner.go` (Go)
+Agenthub 서버 측에서 푸시된 코드에 대해 QA 게이트를 실행하는 로직입니다.
 
 ```go
 package harness
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"time"
 )
 
-// GateResult represents a single gate execution result
-type GateResult struct {
-	Name       string `json:"name"`
-	Status     string `json:"status"` // pass/fail/skip
-	DurationMs int64  `json:"duration_ms"`
-	Output     string `json:"output"`
-}
-
-// GateResults represents the full gate execution results
-type GateResults struct {
-	Gates           []GateResult `json:"gates"`
-	Overall         string       `json:"overall"` // pass/fail
-	TotalDurationMs int64        `json:"total_duration_ms"`
-}
-
-// Runner executes Harness gates for a commit
+// Runner는 서버 측 QA 게이트 실행을 담당합니다.
+// 경로: /home/lunark/projects/ai-native-agentic-org/agenthub/internal/harness/runner.go
 type Runner struct {
-	scriptPath string
-	db         *sql.DB
+	db *sql.DB
 }
 
-// NewRunner creates a new Harness runner
-func NewRunner(scriptPath string, db *sql.DB) *Runner {
-	return &Runner{
-		scriptPath: scriptPath,
-		db:         db,
-	}
+func NewRunner(db *sql.DB) *Runner {
+	return &Runner{db: db}
 }
 
-// RunGatesForCommit executes Harness gates for a commit and stores results
-func (r *Runner) RunGatesForCommit(commitHash string, workspaceDir string) (*GateResults, error) {
-	startTime := time.Now()
-
-	cmd := exec.Command(
-		r.scriptPath,
-		"--project-root", workspaceDir,
-		"--output-format", "json",
-		"--fail-fast",
-	)
-	cmd.Dir = workspaceDir
-
+func (r *Runner) RunPostPushGates(commitHash string, projectPath string, harnessScript string) error {
+	start := time.Now()
+	cmd := exec.Command("bash", harnessScript, "--project-root", projectPath, "--output-format", "json")
+	cmd.Dir = projectPath
 	output, err := cmd.CombinedOutput()
-	duration := time.Since(startTime)
-
-	// Parse results even if command failed (gates may have failed)
-	var results GateResults
-	if parseErr := json.Unmarshal(output, &results); parseErr != nil {
-		return nil, fmt.Errorf("failed to parse gate results: %w (output: %s)", parseErr, string(output))
-	}
-
-	// Store results in database
-	for _, gate := range results.Gates {
-		_, dbErr := r.db.Exec(`
-			INSERT INTO gate_results (commit_hash, gate_name, status, output, duration_ms, created_at)
-			VALUES (?, ?, ?, ?, ?, ?)
-		`, commitHash, gate.Name, gate.Status, gate.Output, gate.DurationMs, time.Now())
-
-		if dbErr != nil {
-			return nil, fmt.Errorf("failed to store gate result: %w", dbErr)
-		}
-	}
-
-	// Log overall result
-	if results.Overall == "pass" {
-		log.Printf("Harness gates passed for commit %s (duration: %v)", commitHash, duration)
-	} else {
-		log.Printf("Harness gates failed for commit %s (duration: %v)", commitHash, duration)
-	}
-
-	// Return results even if gates failed (not an error condition)
-	return &results, nil
-}
-
-// GetGateResults retrieves stored gate results for a commit
-func (r *Runner) GetGateResults(commitHash string) (*GateResults, error) {
-	rows, err := r.db.Query(`
-		SELECT gate_name, status, output, duration_ms
-		FROM gate_results
-		WHERE commit_hash = ?
-		ORDER BY created_at ASC
-	`, commitHash)
+	
+	status := "PASSED"
 	if err != nil {
-		return nil, fmt.Errorf("failed to query gate results: %w", err)
-	}
-	defer rows.Close()
-
-	var gates []GateResult
-	var totalDuration int64
-
-	for rows.Next() {
-		var gate GateResult
-		if err := rows.Scan(&gate.Name, &gate.Status, &gate.Output, &gate.DurationMs); err != nil {
-			return nil, fmt.Errorf("failed to scan gate result: %w", err)
-		}
-		gates = append(gates, gate)
-		totalDuration += gate.DurationMs
+		status = "FAILED"
 	}
 
-	if len(gates) == 0 {
-		return nil, fmt.Errorf("no gate results found for commit %s", commitHash)
+	// DB에 결과 기록
+	query := `
+		INSERT INTO gate_results (commit_hash, gate_name, status, output, duration_ms, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`
+	
+	_, err = r.db.Exec(query, 
+		commitHash, 
+		"post-push-all", 
+		status, 
+		string(output), 
+		time.Since(start).Milliseconds(), 
+		time.Now(),
+	)
+	
+	if status == "FAILED" {
+		return fmt.Errorf("post-push gates failed for commit %s", commitHash)
 	}
-
-	// Determine overall status
-	overall := "pass"
-	for _, gate := range gates {
-		if gate.Status == "fail" {
-			overall = "fail"
-			break
-		}
-	}
-
-	return &GateResults{
-		Gates:           gates,
-		Overall:         overall,
-		TotalDurationMs: totalDuration,
-	}, nil
+	return nil
 }
 ```
 
-**File:** `/home/lunark/projects/ai-native-agentic-org/agenthub/internal/api/git_handler.go` (MODIFIED)
-
-Add gate results endpoint:
-
-```go
-// GetCommitGates returns gate results for a commit
-func (h *GitHandler) GetCommitGates(w http.ResponseWriter, r *http.Request) {
-	commitHash := chi.URLParam(r, "hash")
-
-	results, err := h.harnessRunner.GetGateResults(commitHash)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(results)
-}
-```
-
-**File:** `/home/lunark/projects/ai-native-agentic-org/agenthub/cmd/server/main.go` (MODIFIED)
-
-Register new route:
-
-```go
-r.Get("/api/git/commits/{hash}/gates", gitHandler.GetCommitGates)
-```
-
-### 5.5 WORKFLOW.md Schema Extension
-
-**File:** `/home/lunark/projects/ai-native-agentic-org/symphony/WORKFLOW.md` (MODIFIED)
-
-Add new sections:
+### 5.4 `WORKFLOW.md` 스키마 확장
+Symphony의 워크플로우 설정 파일에 Agenthub 및 Harness 설정을 추가합니다.
 
 ```yaml
-# ... existing tracker, polling, workspace, agent sections ...
+# /home/lunark/projects/ai-native-agentic-org/symphony/WORKFLOW.md
 
-# Agenthub integration
 agenthub:
   enabled: true
-  server_url: http://localhost:8080
-  api_key: $AGENTHUB_API_KEY
+  server_url: "http://localhost:8080"
+  api_key: "${AGENTHUB_API_KEY}"
   push_after_run: true
-  post_to_channel: symphony-logs
+  channel: "factory-log"
 
-# Harness Engineering integration
 harness:
   enabled: true
-  script_path: /home/lunark/projects/ai-native-agentic-org/harness-engineering/.harness/run-gates.sh
+  gates_path: "/home/lunark/projects/ai-native-agentic-org/harness-engineering"
   fail_on_gate_failure: true
-  timeout_ms: 600000  # 10 minutes
-
-# Economic tracking
-economics:
-  enabled: true
-  ledger_path: /var/lib/symphony/economic-ledger.jsonl
-  payment_per_priority:
-    1: 5.0   # Urgent
-    2: 3.0   # High
-    3: 2.0   # Medium
-    4: 1.0   # Low
-    default: 0.5
-  quality_gate_threshold: 0.6  # Minimum evaluation score for payment
-```
-
----
-
-## 6. Data Flow Walkthrough
-
-### 6.1 Happy Path: Issue → Merged PR
-
-**Step 1: Linear Issue Created**
-```
-User creates issue in Linear:
-  Title: "Add user authentication endpoint"
-  Description: "Implement POST /api/auth/login with JWT tokens"
-  State: Todo
-  Priority: High (2)
-```
-
-**Step 2: Symphony Polls Linear**
-```
-[10:00:00] Symphony.Linear.Poller: Polling Linear API
-[10:00:01] Found 1 new issue: LIN-123
-[10:00:01] Symphony.AgentRunner: Starting agent for LIN-123
-[10:00:01] Workspace prepared: /tmp/symphony-workspace-LIN-123
-```
-
-**Step 3: Codex Launched**
-```
-[10:00:02] Launching Codex app-server on port 8081
-[10:00:02] Command: codex app-server --port 8081 --cwd /tmp/symphony-workspace-LIN-123 \
-           --base-instructions "You are an autonomous agent..." \
-           --developer-instructions "Issue: Add user authentication endpoint\n\nImplement POST /api/auth/login..."
-[10:00:03] Codex started, conversation_id: conv_abc123
-```
-
-**Step 4: Codex Implements Feature**
-```
-[10:00:05] Codex: Reading codebase structure
-[10:00:10] Codex: Creating /tmp/symphony-workspace-LIN-123/api/auth.py
-[10:00:15] Codex: Writing JWT token generation logic
-[10:00:20] Codex: Adding tests in tests/test_auth.py
-[10:00:25] Codex: Running pytest... 5 passed
-[10:00:30] Codex: Running LSP diagnostics... no errors
-[10:00:35] Codex: Implementation complete
-```
-
-**Step 5: Bundle Created**
-```
-[10:00:36] Symphony.AgentRunner: Creating git bundle
-[10:00:37] Command: git bundle create /tmp/bundle-123456.bundle HEAD
-[10:00:38] Bundle created: 2.3 MB
-```
-
-**Step 6: Push to Agenthub**
-```
-[10:00:39] Symphony.Agenthub.Client: Pushing bundle to http://localhost:8080/api/git/push
-[10:00:42] Agenthub: Received bundle, hash: a1b2c3d4e5f6...
-[10:00:42] Agenthub: Stored bundle at /var/lib/agenthub/bundles/a1b2c3d4e5f6.bundle
-[10:00:42] Agenthub: Triggering post-push hooks
-[10:00:42] Response: {"hash": "a1b2c3d4e5f6...", "agent_id": "symphony-agent-1"}
-```
-
-**Step 7: Harness Gates Executed**
-```
-[10:00:43] Symphony.Harness.Runner: Running gates for /tmp/symphony-workspace-LIN-123
-[10:00:44] Gate 1 (format): PASS (1234ms)
-[10:00:45] Gate 2 (import_boundaries): PASS (567ms)
-[10:00:46] Gate 3 (ast_ratchets): PASS (890ms)
-[10:00:47] Gate 4 (snapshots): PASS (456ms)
-[10:00:59] Gate 5 (tests): PASS (12345ms) - 5 passed in 12.34s
-[10:01:02] Gate 6 (equivalence): PASS (3456ms)
-[10:01:02] Overall: PASS (18948ms)
-```
-
-**Step 8: Agenthub Stores Gate Results**
-```
-[10:01:03] Agenthub: Storing gate results for commit a1b2c3d4e5f6
-[10:01:03] Inserted 6 gate results into database
-```
-
-**Step 9: Linear Issue Updated**
-```
-[10:01:04] Symphony.AgentRunner: Updating Linear issue LIN-123 to Done
-[10:01:05] Linear API: Issue state updated successfully
-```
-
-**Step 10: Economic Tracking**
-```
-[10:01:06] Symphony.AgentRunner: Tracking work income
-[10:01:06] Amount: $3.00 (priority: High)
-[10:01:06] Evaluation score: 1.0 (all gates passed)
-[10:01:06] Economic SDK: Payment approved (score >= 0.6)
-[10:01:06] Ledger entry written: {"timestamp": "2026-03-10T10:01:06Z", "type": "work_income", "amount": 3.00, ...}
-```
-
-**Step 11: Message Posted**
-```
-[10:01:07] Symphony.Agenthub.Client: Posting to channel symphony-logs
-[10:01:08] Message: "✓ Issue LIN-123 completed: a1b2c3d4e5f6"
-[10:01:08] Post ID: 42
-```
-
-**Total Duration:** 67 seconds (1 minute 7 seconds)
-
-### 6.2 Failure Path: Gates Fail
-
-**Scenario:** AST ratchet gate fails due to high cyclomatic complexity
-
-```
-[10:00:46] Gate 3 (ast_ratchets): FAIL (890ms)
-[10:00:46] Output: "Cyclomatic complexity 15 > 10 in api/auth.py:42"
-[10:00:46] Gate 4 (snapshots): SKIP (0ms) - Previous gate failed
-[10:00:46] Gate 5 (tests): SKIP (0ms) - Previous gate failed
-[10:00:46] Gate 6 (equivalence): SKIP (0ms) - Previous gate failed
-[10:00:46] Overall: FAIL (2691ms)
-
-[10:00:47] Symphony.AgentRunner: Gates failed for issue LIN-123
-[10:00:48] Updating Linear issue LIN-123 to Failed
-[10:00:49] Economic SDK: Payment rejected (evaluation_score: 0.0)
-[10:00:50] Posting failure message to symphony-logs
-[10:00:51] Message: "✗ Issue LIN-123 failed gates: a1b2c3d4e5f6"
-```
-
-**Retry Logic:**
-```
-[10:00:52] Symphony.AgentRunner: Scheduling retry (attempt 1/5)
-[10:00:52] Backoff: 10 seconds
-[10:01:02] Symphony.AgentRunner: Retrying issue LIN-123
-[10:01:03] Launching Codex app-server on port 8082
-... (repeat workflow)
-```
-
-### 6.3 Multi-Agent Collaboration
-
-**Scenario:** Two agents work on related issues, need to merge changes
-
-**Agent 1 (LIN-123): Add authentication endpoint**
-```
-[10:00:00] Agent 1: Implements POST /api/auth/login
-[10:01:00] Agent 1: Pushes bundle a1b2c3d4e5f6
-[10:01:05] Agent 1: Gates pass, issue marked Done
-```
-
-**Agent 2 (LIN-124): Add authorization middleware**
-```
-[10:00:30] Agent 2: Implements authorization decorator
-[10:01:30] Agent 2: Fetches latest leaves from Agenthub
-[10:01:31] Agenthub: Returns leaf a1b2c3d4e5f6 (Agent 1's commit)
-[10:01:32] Agent 2: Fetches bundle a1b2c3d4e5f6
-[10:01:35] Agent 2: Merges changes locally
-[10:01:40] Agent 2: Resolves conflicts (if any)
-[10:01:45] Agent 2: Pushes bundle b2c3d4e5f6a1 (parent: a1b2c3d4e5f6)
-[10:01:50] Agent 2: Gates pass, issue marked Done
-```
-
-**DAG Structure:**
-```
-main (f6e5d4c3b2a1)
-  |
-  ├─ Agent 1 (a1b2c3d4e5f6) - Add auth endpoint
-  |
-  └─ Agent 2 (b2c3d4e5f6a1) - Add auth middleware (parent: a1b2c3d4e5f6)
-```
-
----
-
-## 7. MVP Scope
-
-### 7.1 In Scope
-
-**Core Features:**
-- Linear issue polling (30s interval)
-- Single-agent workflow (one issue per agent)
-- Codex app-server integration
-- Git bundle push/fetch via Agenthub
-- 6-Gate QA enforcement
-- Economic tracking (LLM costs + work income)
-- Message board logging
-- Retry logic (exponential backoff, max 5 attempts)
-- Linear issue state updates (Todo → In Progress → Done/Failed)
-
-**Supported Project Types:**
-- Python (pytest, ruff, mypy)
-- TypeScript (vitest, oxlint, tsc)
-- Single repository only
-
-**Quality Gates:**
-- Format (ruff, oxfmt)
-- Import boundaries (AST analysis)
-- AST ratchets (complexity, forbidden patterns)
-- Snapshots (vitest, pytest)
-- Tests (pytest, vitest)
-- Equivalence (differential testing)
-
-### 7.2 Out of Scope (Post-MVP)
-
-**Deferred Features:**
-- Multi-repository coordination
-- Human code review integration (GitHub PR reviews)
-- Custom gate definitions (6-Gate fixed for MVP)
-- Real-time collaboration UI (async only)
-- Cross-project dependency resolution
-- Agent-to-agent negotiation (conflict resolution is manual)
-- Advanced retry strategies (fixed exponential backoff only)
-- Multi-language support beyond Python/TypeScript
-- Performance optimization (caching, parallel gates)
-- Monitoring dashboard (logs only)
-
-### 7.3 Success Criteria (MVP)
-
-| Criterion | Target | Measurement |
-|-----------|--------|-------------|
-| End-to-end workflow | 1 successful run | Manual test |
-| Gate pass rate | >80% | Harness logs |
-| No regressions | 0 broken tests | CI |
-| Economic tracking | 1 ledger entry | JSONL file |
-| Documentation | All APIs documented | This spec |
-
----
-
-## 8. 2-Week Sprint Plan
-
-### Week 1: Foundation & Integration
-
-**Day 1 (Mon): Symphony Agenthub Client**
-- [ ] Create `lib/symphony_elixir/agenthub/client.ex`
-- [ ] Implement `push_bundle/2`, `fetch_bundle/1`, `get_leaves/0`, `get_diff/2`, `post_message/2`
-- [ ] Add HTTPoison dependency to `mix.exs`
-- [ ] Write unit tests with mocked HTTP responses
-- [ ] Test against local Agenthub instance
-
-**Day 2 (Tue): Symphony Harness Runner**
-- [ ] Create `lib/symphony_elixir/harness/runner.ex`
-- [ ] Implement `run_gates/2`, `parse_results/1`
-- [ ] Add timeout handling (10 minutes default)
-- [ ] Write unit tests with fixture JSON outputs
-- [ ] Test against harness-engineering repo
-
-**Day 3 (Wed): Symphony Agent Runner Integration**
-- [ ] Modify `lib/symphony_elixir/agent_runner.ex`
-- [ ] Add bundle creation logic (`git bundle create`)
-- [ ] Integrate Agenthub client (push after Codex completion)
-- [ ] Integrate Harness runner (run gates after push)
-- [ ] Add economic tracking calls
-- [ ] Write integration tests (end-to-end workflow)
-
-**Day 4 (Thu): Agenthub Harness Integration**
-- [ ] Create `internal/harness/runner.go`
-- [ ] Implement `RunGatesForCommit`, `GetGateResults`
-- [ ] Add `gate_results` table migration
-- [ ] Modify `internal/api/git_handler.go` (add `/api/git/commits/{hash}/gates` endpoint)
-- [ ] Write unit tests with mocked subprocess
-- [ ] Test post-push hook execution
-
-**Day 5 (Fri): WORKFLOW.md Schema & Config**
-- [ ] Extend `WORKFLOW.md` with `agenthub`, `harness`, `economics` sections
-- [ ] Update Symphony config parser to read new sections
-- [ ] Add environment variable validation (`AGENTHUB_API_KEY`, `LINEAR_API_KEY`)
-- [ ] Write config validation tests
-- [ ] Document all config options in README
-
-### Week 2: Testing & Deployment
-
-**Day 6 (Mon): End-to-End Testing**
-- [ ] Set up test Linear workspace (sandbox team)
-- [ ] Create test issues (simple, medium, complex)
-- [ ] Run full workflow: Linear → Symphony → Codex → Agenthub → Harness
-- [ ] Verify gate results stored in Agenthub DB
-- [ ] Verify Linear issue state updates
-- [ ] Verify economic ledger entries
-
-**Day 7 (Tue): Failure Scenarios**
-- [ ] Test gate failures (inject complexity violations)
-- [ ] Test Codex timeout (30-minute limit)
-- [ ] Test Agenthub rate limiting (exceed 60 pushes/hour)
-- [ ] Test retry logic (exponential backoff)
-- [ ] Test bundle creation failures (corrupted git repo)
-- [ ] Verify error messages posted to message board
-
-**Day 8 (Wed): Multi-Agent Collaboration**
-- [ ] Create two related Linear issues
-- [ ] Launch two Symphony agents in parallel
-- [ ] Verify DAG structure in Agenthub (parent-child commits)
-- [ ] Test conflict resolution (manual merge)
-- [ ] Verify both issues marked Done
-- [ ] Verify economic tracking for both agents
-
-**Day 9 (Thu): Performance & Optimization**
-- [ ] Profile Symphony (identify bottlenecks)
-- [ ] Optimize bundle push (compression, streaming)
-- [ ] Optimize gate execution (parallel where possible)
-- [ ] Add logging for all critical paths
-- [ ] Add metrics collection (Prometheus format)
-- [ ] Document performance characteristics
-
-**Day 10 (Fri): Documentation & Deployment**
-- [ ] Write deployment guide (Docker Compose setup)
-- [ ] Write operator manual (monitoring, troubleshooting)
-- [ ] Write developer guide (adding new gates, extending workflow)
-- [ ] Create architecture diagrams (Mermaid/PlantUML)
-- [ ] Record demo video (end-to-end workflow)
-- [ ] Deploy to staging environment
-
-### Contingency Buffer
-
-**Days 11-14:** Reserved for:
-- Bug fixes from testing
-- Performance issues
-- Integration edge cases
-- Documentation gaps
-- Stakeholder feedback
-
----
-
-## 9. Business Model & Revenue
-
-### 9.1 Pricing Tiers
-
-**Tier 1: Developer (Self-Hosted)**
-- **Price:** Free (open source)
-- **Target:** Individual developers, hobbyists
-- **Limits:** Single agent, 10 issues/day
-- **Support:** Community (GitHub issues)
-
-**Tier 2: Team (SaaS)**
-- **Price:** $150/developer/month
-- **Target:** Engineering teams (5-50 developers)
-- **Limits:** Unlimited agents, 1000 issues/day
-- **Support:** Email support (48-hour SLA)
-- **Features:**
-  - Hosted Symphony + Agenthub
-  - Linear integration
-  - GitHub integration (auto-PR creation)
-  - Economic dashboard
-  - 30-day audit logs
-
-**Tier 3: Enterprise (SaaS + On-Prem)**
-- **Price:** $5,000/month flat rate (unlimited developers)
-- **Target:** Large engineering orgs (50-500 developers)
-- **Limits:** Unlimited agents, unlimited issues
-- **Support:** Dedicated Slack channel (4-hour SLA)
-- **Features:**
-  - All Team features
-  - On-premises deployment option
-  - Custom gate definitions
-  - Multi-repository coordination
-  - SSO/SAML integration
-  - 1-year audit logs
-  - Quarterly business reviews
-
-**Tier 4: Pay-Per-PR**
-- **Price:** $2/merged PR
-- **Target:** Occasional users, contractors
-- **Limits:** No monthly commitment
-- **Support:** Email support (72-hour SLA)
-- **Features:**
-  - Hosted Symphony + Agenthub
-  - Linear integration
-  - Economic dashboard
-
-### 9.2 Revenue Projections (Year 1)
-
-**Assumptions:**
-- 100 Team customers (avg 10 developers each) = $150K/month
-- 10 Enterprise customers = $50K/month
-- 500 Pay-Per-PR users (avg 5 PRs/month) = $5K/month
-
-**Monthly Recurring Revenue (MRR):** $205K  
-**Annual Recurring Revenue (ARR):** $2.46M
-
-**Cost Structure:**
-- Infrastructure (AWS/GCP): $20K/month
-- LLM API costs (Claude): $30K/month (avg $0.30/PR × 100K PRs)
-- Engineering team (5 FTE): $100K/month
-- Sales & marketing: $30K/month
-- **Total costs:** $180K/month
-
-**Net profit:** $25K/month ($300K/year)  
-**Profit margin:** 12%
-
-### 9.3 Key Metrics
-
-**North Star Metric:** PR merge rate (% of agent-generated PRs merged without human intervention)
-
-**Supporting Metrics:**
-- Time-to-merge (median, p95)
-- Defect rate (% of merged PRs with bugs within 7 days)
-- Gate pass rate (% of first-attempt gate passes)
-- Economic ROI (revenue per dollar of LLM cost)
-- Customer retention (monthly churn rate)
-- Net Promoter Score (NPS)
-
-**Target Metrics (Year 1):**
-- PR merge rate: >60%
-- Time-to-merge (median): <4 hours
-- Defect rate: <5%
-- Gate pass rate: >95%
-- Economic ROI: >300%
-- Monthly churn: <5%
-- NPS: >50
-
-### 9.4 Go-to-Market Strategy
-
-**Phase 1 (Months 1-3): Early Adopters**
-- Launch open-source version (GitHub)
-- Target AI-native engineering teams (YC companies, AI startups)
-- Offer free Team tier for first 10 customers (3-month pilot)
-- Collect feedback, iterate on product
-
-**Phase 2 (Months 4-6): Product-Market Fit**
-- Launch paid Team tier
-- Add GitHub integration (auto-PR creation)
-- Publish case studies (PR merge rate, time savings)
-- Speak at conferences (AI Engineer Summit, GitHub Universe)
-
-**Phase 3 (Months 7-12): Scale**
-- Launch Enterprise tier
-- Hire sales team (2 AEs, 1 SDR)
-- Launch Pay-Per-PR tier
-- Expand to multi-repository support
-- Partner with Linear, GitHub (co-marketing)
-
----
-
-## 10. Risk & Mitigation
-
-### 10.1 Technical Risks
-
-**Risk 1: Codex Reliability**
-- **Description:** Codex may produce incorrect code, fail to converge, or timeout
-- **Impact:** High (blocks entire workflow)
-- **Probability:** Medium (30% of issues)
-- **Mitigation:**
-  - Retry logic (exponential backoff, max 5 attempts)
-  - Harness gates catch most errors before merge
-  - Human fallback (escalate to Linear after 5 failures)
-  - Improve prompts based on failure patterns
-
-**Risk 2: Gate False Positives**
-- **Description:** Gates may fail on valid code (e.g., complexity threshold too strict)
-- **Impact:** Medium (blocks valid PRs)
-- **Probability:** Low (5% of runs)
-- **Mitigation:**
-  - Tunable gate thresholds (per-project config)
-  - Manual override option (with audit log)
-  - Continuous gate calibration (analyze false positive rate)
-
-**Risk 3: Agenthub Scalability**
-- **Description:** Bundle storage may grow unbounded, DB may slow down
-- **Impact:** Medium (degrades performance)
-- **Probability:** Medium (after 10K commits)
-- **Mitigation:**
-  - Implement garbage collection (prune old bundles)
-  - Add DB indexes (commit_hash, agent_id, created_at)
-  - Shard by agent_id (horizontal scaling)
-  - Monitor storage usage (alert at 80% capacity)
-
-**Risk 4: Multi-Agent Conflicts**
-- **Description:** Two agents may modify the same file, causing merge conflicts
-- **Impact:** Medium (requires manual resolution)
-- **Probability:** Low (10% of parallel runs)
-- **Mitigation:**
-  - Implement conflict detection (diff analysis)
-  - Automatic retry with latest base (fetch leaves, rebase)
-  - Human escalation after 3 failed merge attempts
-  - Future: Agent-to-agent negotiation protocol
-
-### 10.2 Business Risks
-
-**Risk 5: LLM Cost Volatility**
-- **Description:** Claude API pricing may increase, eroding margins
-- **Impact:** High (affects profitability)
-- **Probability:** Medium (annual price changes)
-- **Mitigation:**
-  - Pass-through pricing (adjust per-PR cost quarterly)
-  - Multi-model support (fallback to cheaper models)
-  - Negotiate volume discounts with Anthropic
-  - Monitor cost per PR (alert if >$0.50)
-
-**Risk 6: Customer Adoption**
-- **Description:** Teams may resist autonomous agents (trust, job security concerns)
-- **Impact:** High (affects revenue)
-- **Probability:** Medium (cultural resistance)
-- **Mitigation:**
-  - Emphasize augmentation, not replacement
-  - Publish case studies (time savings, quality improvements)
-  - Offer free pilots (prove value before commitment)
-  - Provide human-in-the-loop option (review before merge)
-
-**Risk 7: Competitive Landscape**
-- **Description:** GitHub Copilot Workspace, Cursor, Devin may offer similar features
-- **Impact:** High (market share erosion)
-- **Probability:** High (inevitable)
-- **Mitigation:**
-  - Focus on quality (6-Gate QA is differentiator)
-  - Focus on economics (transparent cost tracking)
-  - Open-source core (build community moat)
-  - Integrate with competitors (Copilot as execution engine)
-
-### 10.3 Operational Risks
-
-**Risk 8: Linear API Rate Limits**
-- **Description:** Polling every 30s may hit Linear rate limits (1000 req/hour)
-- **Impact:** Medium (delays issue detection)
-- **Probability:** Low (only at scale)
-- **Mitigation:**
-  - Implement webhook support (push instead of poll)
-  - Increase polling interval (60s) if rate limited
-  - Cache issue state (only fetch changed issues)
-  - Negotiate higher limits with Linear
-
-**Risk 9: Security Vulnerabilities**
-- **Description:** Agents may introduce security bugs (SQL injection, XSS, etc.)
-- **Impact:** High (customer data breach)
-- **Probability:** Low (gates catch most issues)
-- **Mitigation:**
-  - Add security gate (Semgrep, Bandit, ESLint security rules)
-  - Sandbox agent execution (read-only by default)
-  - Audit all merged PRs (automated + manual review)
-  - Bug bounty program (incentivize external security research)
-
-**Risk 10: Data Privacy**
-- **Description:** Customer code sent to Claude API (GDPR, SOC 2 concerns)
-- **Impact:** High (regulatory compliance)
-- **Probability:** Medium (enterprise requirement)
-- **Mitigation:**
-  - Offer on-premises deployment (Enterprise tier)
-  - Use Anthropic's zero-retention API (no training on customer data)
-  - Implement data residency options (EU, US regions)
-  - SOC 2 Type II certification (Year 2 goal)
-
----
-
-## 11. Success Metrics
-
-### 11.1 Product Metrics
-
-**Primary Metrics:**
-- **PR Merge Rate:** % of agent-generated PRs merged without human intervention
-  - Target: >60% (MVP), >80% (Year 1)
-  - Measurement: GitHub API (merged_by = agent)
-- **Time-to-Merge:** Median time from issue creation to PR merge
-  - Target: <4 hours (MVP), <2 hours (Year 1)
-  - Measurement: Linear created_at → GitHub merged_at
-- **Defect Rate:** % of merged PRs with bugs within 7 days
-  - Target: <5% (MVP), <2% (Year 1)
-  - Measurement: Issue reopens, hotfix commits
-
-**Secondary Metrics:**
-- **Gate Pass Rate:** % of first-attempt gate passes
-  - Target: >95%
-  - Measurement: Harness logs (overall = pass)
-- **Economic ROI:** Revenue per dollar of LLM cost
-  - Target: >300%
-  - Measurement: Economic SDK (work_income / llm_cost)
-- **Agent Utilization:** % of time agents are actively working
-  - Target: >70%
-  - Measurement: Codex runtime / total uptime
-
-### 11.2 Business Metrics
-
-**Revenue Metrics:**
-- **MRR (Monthly Recurring Revenue):** Total subscription revenue
-  - Target: $50K (Month 6), $200K (Month 12)
-- **ARR (Annual Recurring Revenue):** MRR × 12
-  - Target: $2.4M (Year 1)
-- **ARPU (Average Revenue Per User):** MRR / active customers
-  - Target: $150/developer/month
-- **Customer Acquisition Cost (CAC):** Sales & marketing spend / new customers
-  - Target: <$5K/customer
-- **Lifetime Value (LTV):** ARPU × avg customer lifetime (months)
-  - Target: >$18K (12-month retention)
-
-**Growth Metrics:**
-- **Monthly Active Users (MAU):** Unique developers using the platform
-  - Target: 100 (Month 6), 500 (Month 12)
-- **Net Revenue Retention (NRR):** (MRR + expansion - churn) / MRR
-  - Target: >100% (expansion offsets churn)
-- **Churn Rate:** % of customers canceling per month
-  - Target: <5%
-
-### 11.3 Operational Metrics
-
-**Reliability Metrics:**
-- **Uptime:** % of time Symphony + Agenthub are available
-  - Target: >99.5% (4 hours downtime/month)
-- **Error Rate:** % of agent runs that fail (non-gate failures)
-  - Target: <1%
-- **P95 Latency:** 95th percentile response time for Agenthub API
-  - Target: <500ms
-
-**Cost Metrics:**
-- **LLM Cost per PR:** Average Claude API cost per merged PR
-  - Target: <$0.30
-- **Infrastructure Cost per PR:** AWS/GCP cost per merged PR
-  - Target: <$0.10
-- **Gross Margin:** (Revenue - COGS) / Revenue
-  - Target: >70%
-
----
-
-## 12. Appendix: Config Schemas
-
-### 12.1 WORKFLOW.md (Complete Schema)
-
-```yaml
-# Linear issue tracker configuration
-tracker:
-  type: linear
-  api_key: $LINEAR_API_KEY
-  team_id: $LINEAR_TEAM_ID
-  polling_interval_ms: 30000
-  states:
-    todo: "Todo"
-    in_progress: "In Progress"
-    done: "Done"
-    failed: "Failed"
-
-# Polling behavior
-polling:
-  enabled: true
-  interval_ms: 30000
-  max_concurrent_agents: 5
-  retry:
-    max_attempts: 5
-    initial_backoff_ms: 10000
-    max_backoff_ms: 300000
-    backoff_multiplier: 2
-
-# Workspace configuration
-workspace:
-  base_dir: /tmp/symphony-workspaces
-  cleanup_after_completion: false
-  git_config:
-    user_name: "Symphony Agent"
-    user_email: "agent@symphony.local"
-
-# Agent configuration
-agent:
-  type: codex
-  executable: codex
-  args:
-    - app-server
-    - --approval-policy
-    - never
-    - --sandbox
-    - workspace-write
-  timeout_ms: 1800000  # 30 minutes
-  port_range:
-    start: 8081
-    end: 8181
-
-# Agenthub integration
-agenthub:
-  enabled: true
-  server_url: http://localhost:8080
-  api_key: $AGENTHUB_API_KEY
-  push_after_run: true
-  post_to_channel: symphony-logs
-  retry:
-    max_attempts: 3
-    initial_backoff_ms: 1000
-    max_backoff_ms: 10000
-
-# Harness Engineering integration
-harness:
-  enabled: true
-  script_path: /home/lunark/projects/ai-native-agentic-org/harness-engineering/.harness/run-gates.sh
-  fail_on_gate_failure: true
-  timeout_ms: 600000  # 10 minutes
-  gates:
+  required_gates:
     - format
-    - import_boundaries
-    - ast_ratchets
-    - snapshots
     - tests
-    - equivalence
+    - ast-ratchets
 
-# Economic tracking
 economics:
   enabled: true
-  ledger_path: /var/lib/symphony/economic-ledger.jsonl
+  track_llm: true
+  min_eval_score: 0.6
   payment_per_priority:
     1: 5.0   # Urgent
     2: 3.0   # High
     3: 2.0   # Medium
     4: 1.0   # Low
-    default: 0.5
-  quality_gate_threshold: 0.6  # Minimum evaluation score for payment
-  llm_cost_tracking: true
-
-# Logging
-logging:
-  level: info
-  format: json
-  output: /var/log/symphony/symphony.log
-  rotation:
-    max_size_mb: 100
-    max_files: 10
-
-# Monitoring
-monitoring:
-  prometheus:
-    enabled: true
-    port: 9090
-  health_check:
-    enabled: true
-    port: 8080
-    path: /health
-```
-
-### 12.2 Agenthub Config (config.yaml)
-
-```yaml
-# Server configuration
-server:
-  host: 0.0.0.0
-  port: 8080
-  read_timeout_seconds: 60
-  write_timeout_seconds: 60
-
-# Database configuration
-database:
-  type: sqlite
-  path: /var/lib/agenthub/agenthub.db
-  max_connections: 10
-  connection_timeout_seconds: 5
-
-# Storage configuration
-storage:
-  bundles_dir: /var/lib/agenthub/bundles
-  max_bundle_size_mb: 100
-  cleanup:
-    enabled: true
-    retention_days: 90
-    schedule: "0 2 * * *"  # 2 AM daily
-
-# Rate limiting
-rate_limits:
-  max_pushes_per_hour: 60
-  max_posts_per_hour: 60
-  max_diffs_per_hour: 60
-  max_fetches_per_hour: 300
-
-# Authentication
-auth:
-  token_header: Authorization
-  token_prefix: Bearer
-
-# Harness integration
-harness:
-  enabled: true
-  script_path: /home/lunark/projects/ai-native-agentic-org/harness-engineering/.harness/run-gates.sh
-  run_on_push: true
-  timeout_seconds: 600
-
-# Logging
-logging:
-  level: info
-  format: json
-  output: /var/log/agenthub/agenthub.log
-
-# Monitoring
-monitoring:
-  prometheus:
-    enabled: true
-    port: 9091
-```
-
-### 12.3 Economic SDK Config (economic_config.yaml)
-
-```yaml
-# Ledger configuration
-ledger:
-  path: /var/lib/symphony/economic-ledger.jsonl
-  rotation:
-    enabled: true
-    max_size_mb: 100
-    max_files: 10
-
-# Quality gate
-quality_gate:
-  enabled: true
-  threshold: 0.6
-  reject_below_threshold: true
-
-# LLM cost tracking
-llm_costs:
-  claude-sonnet-4-5:
-    input_cost_per_1k_tokens: 0.003
-    output_cost_per_1k_tokens: 0.015
-  claude-opus-4:
-    input_cost_per_1k_tokens: 0.015
-    output_cost_per_1k_tokens: 0.075
-
-# Metrics
-metrics:
-  compute_daily_summary: true
-  compute_weekly_summary: true
-  sustainability_threshold: 1.0  # ROI must be >= 1.0
-
-# Reporting
-reporting:
-  enabled: true
-  output_dir: /var/lib/symphony/reports
-  formats:
-    - json
-    - csv
-  schedule: "0 0 * * *"  # Midnight daily
 ```
 
 ---
 
-## 13. Next Steps
+## 6. 데이터 흐름 상세 (Data Flow Walkthrough)
 
-### 13.1 Immediate Actions (Week 1)
-
-1. **Set up development environment:**
-   - Clone all repos (symphony, agenthub, harness-engineering, economic-sdk)
-   - Install dependencies (Elixir, Go, Python)
-   - Configure environment variables (LINEAR_API_KEY, AGENTHUB_API_KEY)
-
-2. **Create feature branches:**
-   - `symphony/feature/agenthub-integration`
-   - `agenthub/feature/harness-integration`
-
-3. **Implement glue code:**
-   - Start with Symphony Agenthub client (Day 1)
-   - Follow 2-week sprint plan
-
-4. **Set up test infrastructure:**
-   - Create test Linear workspace
-   - Deploy local Agenthub instance
-   - Configure test harness-engineering
-
-### 13.2 Validation Checkpoints
-
-**Checkpoint 1 (Day 5):** Glue code complete
-- All modules implemented
-- Unit tests passing
-- Integration tests written (not yet passing)
-
-**Checkpoint 2 (Day 10):** End-to-end workflow
-- One successful run (Linear → Symphony → Codex → Agenthub → Harness)
-- Gate results stored in Agenthub
-- Economic ledger entry created
-
-**Checkpoint 3 (Day 14):** MVP complete
-- All success criteria met
-- Documentation complete
-- Deployed to staging
-
-### 13.3 Post-MVP Roadmap
-
-**Q2 2026: GitHub Integration**
-- Auto-create PRs from agent commits
-- Link Linear issues to GitHub PRs
-- Merge PRs automatically if gates pass
-
-**Q3 2026: Multi-Repository Support**
-- Coordinate changes across multiple repos
-- Dependency graph analysis
-- Atomic multi-repo commits
-
-**Q4 2026: Advanced Features**
-- Custom gate definitions (YAML config)
-- Agent-to-agent negotiation (conflict resolution)
-- Real-time collaboration UI (WebSocket dashboard)
+1.  **이슈 탐지 (Issue Detection)**: Symphony의 `LinearPoller`가 Linear API를 호출하여 "Todo" 상태의 이슈를 가져옵니다.
+2.  **에이전트 할당 (Agent Allocation)**: Symphony가 이슈 ID를 기반으로 전용 작업 디렉토리를 생성하고 `AgentRunner`를 시작합니다.
+3.  **경제적 트래킹 시작 (Cost Tracking)**: `EconomicTracker`가 해당 세션의 비용 추적을 시작합니다.
+4.  **RPEQ 실행 (Execution)**:
+    - **Research**: 에이전트가 코드베이스를 분석합니다.
+    - **Plan**: 구현 계획을 수립합니다.
+    - **Execute**: 코드를 수정합니다. LLM 호출 시마다 `track_llm_call`이 호출됩니다.
+5.  **로컬 QA 검증 (Local QA)**: Symphony가 `Harness.Runner`를 통해 `run-gates.sh`를 실행합니다.
+    - 게이트 실패 시 에이전트에게 피드백을 주고 재시도(최대 3회)합니다.
+6.  **코드 푸시 (Code Push)**: 모든 로컬 게이트 통과 시, Symphony가 수정된 코드를 바이너리 번들로 묶어 Agenthub의 `/api/git/push`로 전송합니다.
+7.  **서버 QA 검증 (Server QA)**: Agenthub 서버가 푸시된 번들을 풀고 서버 측 QA 게이트를 실행합니다.
+8.  **최종 승인 및 보상 (Approval & Reward)**: 서버 게이트 통과 시, `EconomicTracker.add_work_income`을 통해 에이전트에게 수익을 배정하고 Linear 이슈 상태를 "Done"으로 변경합니다.
+9.  **로그 기록 (Logging)**: 모든 과정은 Agenthub의 메시지 보드에 실시간으로 기록되어 대시보드에서 확인 가능합니다.
 
 ---
 
-## 14. Conclusion
+## 7. MVP 범위 (MVP Scope)
 
-The Autonomous Software Factory (UC1) represents a paradigm shift in software development: agents as first-class contributors, mechanical quality enforcement, and economic accountability. By integrating Symphony (orchestration), Agenthub (distributed VCS), Harness Engineering (QA gates), and Economic SDK (ledger), we create a closed-loop system where code quality and economic viability are inseparable.
+### 7.1 포함 범위 (In Scope)
+- Linear 이슈 폴링 및 상태 업데이트 연동.
+- Symphony ↔ Agenthub 간의 코드 번들 전송 API.
+- Harness 6-Gate 중 핵심 3종(Format, Tests, AST Ratchets) 연동.
+- Economic SDK를 통한 LLM 비용 및 기본 수익 기록.
+- 단일 리포지토리 내에서의 자율 수정 및 검증.
+- 에이전트 실행 로그의 실시간 메시지 보드 기록.
 
-**Key Differentiators:**
-- **Quality-first:** 6-Gate QA catches errors before merge (not after)
-- **Economic transparency:** Every PR has a cost and value
-- **Agent collaboration:** DAG-based version control enables multi-agent workflows
-- **Open core:** Community can self-host, enterprises get premium features
-
-**Success Hinges On:**
-- Codex reliability (retry logic, prompt engineering)
-- Gate calibration (minimize false positives)
-- Customer trust (prove value through pilots)
-- Operational excellence (uptime, performance, security)
-
-This specification provides a complete blueprint for implementation. All APIs are defined, all glue code is specified, and all risks are identified. The 2-week sprint plan is aggressive but achievable with focused execution.
-
-**Let's build the future of software development.**
+### 7.2 제외 범위 (Out Scope)
+- 다중 리포지토리 간의 의존성 해결.
+- 복잡한 Git 컨플릭트 자동 해결 (인간 개입 필요).
+- 에이전트 간의 고도화된 협상 및 리소스 경매 시스템.
+- 실시간 화상 채팅 기반의 인간-에이전트 협업 UI.
+- 커스텀 QA 게이트 정의 UI.
 
 ---
 
-**Document Version:** 1.0.0  
-**Last Updated:** 2026-03-10  
-**Authors:** @zzragida, Symphony Team  
-**Status:** Ready for Implementation  
+## 8. 2주 스프린트 계획 (2-Week Sprint Plan)
 
-**Approval Signatures:**
-- [ ] Technical Lead: _______________
-- [ ] Product Manager: _______________
-- [ ] Engineering Manager: _______________
+### Week 1: 기반 인프라 및 연동 모듈 구축
+- **Day 1: Symphony ↔ Agenthub 연동**
+    - `SymphonyElixir.Agenthub.Client` 모듈 구현.
+    - Agenthub API Key 기반 인증 로직 및 에러 핸들링 추가.
+    - 바이너리 번들 전송 성능 최적화 (Chunked Transfer).
+- **Day 2: Symphony ↔ Harness 연동**
+    - `SymphonyElixir.Harness.Runner` 모듈 구현.
+    - `System.cmd`를 통한 서브프로세스 실행 및 실시간 스트리밍 로그 캡처.
+    - JSON 결과 파싱 및 게이트별 상태 매핑 로직 완성.
+- **Day 3: Agenthub 서버 기능 확장**
+    - SQLite 스키마 업데이트 (`gate_results` 테이블 생성).
+    - `internal/harness/runner.go` 구현 및 Post-push Hook 연동.
+    - 커밋 해시 기반 게이트 결과 조회 API (`GET /api/git/commits/{hash}/gates`) 추가.
+- **Day 4: Economic SDK 통합**
+    - Symphony `AgentRunner` 내 `EconomicTracker` 데코레이터 적용.
+    - LLM 토큰 사용량 계산 및 비용 기록 로직 검증.
+    - 품질 점수 기반 수익 배분 알고리즘 구현.
+- **Day 5: 워크플로우 설정 및 검증**
+    - `WORKFLOW.md` 파서 업데이트 및 환경 변수 치환 기능 추가.
+    - 에이전트 실행 전 필수 도구(Git, Python, Go) 설치 여부 확인 로직 추가.
+- **Day 6-7: 1주차 통합 테스트 및 버그 수정**
+    - 모의(Mock) 에이전트를 이용한 전체 파이프라인 연동 테스트.
+    - 네트워크 지연 및 API 타임아웃 시나리오 대응.
 
-**Next Review Date:** 2026-03-24 (2 weeks post-kickoff)
+### Week 2: 엔드투엔드 워크플로우 완성 및 최적화
+- **Day 8: Linear API 심화 연동**
+    - Linear GraphQL API를 통한 이슈 상세 정보 및 라벨 기반 필터링 구현.
+    - 이슈 상태 전환 자동화 (Todo → In Progress → Done/Failed).
+    - 작업 완료 시 Linear 댓글로 작업 요약 및 Agenthub 커밋 링크 자동 게시.
+- **Day 9: 에이전트 자가 치유(Self-healing) 로직**
+    - QA 게이트 실패 시 에러 로그를 에이전트에게 전달하여 자동 수정 유도.
+    - 최대 재시도 횟수 및 지수 백오프(Exponential Backoff) 정책 적용.
+- **Day 10: 실시간 모니터링 대시보드 연동**
+    - Agenthub 메시지 보드를 활용한 작업 단계별 실시간 브로드캐스팅.
+    - 에이전트별 현재 상태 및 작업 이력 조회 API 구현.
+- **Day 11: 경제 시스템 고도화**
+    - 에이전트별 지갑(Wallet) 시스템 및 일일 정산 보고서 자동 생성.
+    - ROI가 낮은 에이전트 자동 비활성화 정책 구현.
+- **Day 12: 엔드투엔드 시나리오 테스트**
+    - 실제 오픈소스 프로젝트 버그 수정을 대상으로 한 전 과정 자동화 테스트.
+    - 다중 에이전트 병렬 실행 시 리소스 경합 및 컨플릭트 테스트.
+- **Day 13: 성능 최적화 및 보안 강화**
+    - 코드 번들 압축 알고리즘 개선 및 병렬 게이트 실행 도입.
+    - 에이전트 샌드박스 권한 최소화 및 민감 정보 필터링.
+- **Day 14: 최종 문서화 및 MVP 시연**
+    - 운영 매뉴얼 및 API 명세서 최종 업데이트.
+    - 주요 이해관계자 대상 엔드투엔드 워크플로우 시연.
+
+---
+
+## 9. 비즈니스 모델 및 수익 구조 (Business Model & Revenue)
+
+### 9.1 수익 모델 (Revenue Model)
+1.  **SaaS 라이선스**: 개발자 인당 월 $150 (에이전트 무제한 사용).
+2.  **PR 기반 과금**: 성공적으로 머지된 PR당 $2 (소규모 팀 타겟).
+3.  **엔터프라이즈**: 온프레미스 설치 및 커스텀 에이전트 학습 지원 (월 $5,000+).
+4.  **컴퓨팅 리소스 재판매**: 에이전트 실행에 필요한 GPU 자원 마진 판매.
+
+### 9.2 시장 분석 및 경쟁 우위 (Market Analysis & Competitive Advantage)
+- **시장 상황**: GitHub Copilot Workspace, Cursor 등 AI 코딩 도구의 급격한 성장.
+- **차별화 포인트**:
+    - **품질 우선주의**: 단순 생성이 아닌 6-Gate QA를 통한 "검증된 코드"만 머지.
+    - **경제적 투명성**: 모든 작업의 비용과 가치를 실시간으로 추적하여 ROI 증명.
+    - **자율적 협업**: Agenthub의 Git DAG를 통해 여러 에이전트가 동시에 안전하게 작업 가능.
+    - **플랫폼 독립성**: 특정 IDE나 클라우드에 종속되지 않는 유연한 아키텍처.
+
+### 9.3 수익 추정 (Revenue Projections - Year 1)
+- **가정**: 100개 고객사, 평균 20명 개발자.
+- **월 매출**: 100개사 * 20명 * $150 = $300,000 (약 4억원).
+- **운영 비용**: 
+    - LLM API 비용: $60,000 (매출의 20%).
+    - 인프라 비용: $30,000 (매출의 10%).
+    - 인건비 및 마케팅: $100,000.
+- **예상 월 순이익**: $110,000 (약 1.5억원).
+- **예상 영업이익률**: 36.7%.
+
+---
+
+## 10. 리스크 및 완화 전략 (Risk & Mitigation)
+
+| 리스크 | 영향도 | 완화 전략 |
+| :--- | :--- | :--- |
+| **에이전트 할루시네이션** | 높음 | 6-Gate QA를 통해 코드 레벨에서 엄격히 차단. 특히 Equivalence Gate를 통해 의도치 않은 로직 변경 방지. |
+| **보안 취약점 노출** | 높음 | Agenthub 내에서 정적 분석(SAST) 게이트 필수 실행. 민감한 API 키나 비밀번호가 코드에 포함되지 않도록 스캔. |
+| **LLM 비용 폭주** | 중간 | Economic SDK에 세션별/일별 하드 캡(Hard Cap) 설정. 비정상적으로 많은 토큰을 사용하는 에이전트 자동 차단. |
+| **Git 컨플릭트** | 중간 | 에이전트 전용 브랜치 전략 및 선점형 잠금(Locking) 도입. 충돌 발생 시 최신 base로 자동 rebase 시도. |
+| **Linear API 속도 제한** | 낮음 | 웹훅(Webhook) 도입을 통한 폴링 부하 감소. 지수 백오프를 적용한 재시도 메커니즘 구현. |
+| **인프라 장애** | 중간 | Symphony 및 Agenthub의 고가용성(HA) 구성. 데이터베이스 정기 백업 및 재해 복구(DR) 계획 수립. |
+
+---
+
+## 11. 성공 지표 (Success Metrics)
+
+### 11.1 정량적 지표 (Quantitative Metrics)
+- **PR 머지 성공률 (PR Merge Rate)**: 에이전트가 생성한 PR 중 70% 이상이 추가 수정 없이 머지됨.
+- **평균 수정 시간 (MTTR)**: 이슈 할당 후 해결까지 평균 15분 이내 완료 (인간 개발자 대비 10배 이상 빠름).
+- **결함 밀도 (Defect Density)**: 에이전트 수정 코드에서 발생하는 버그 수가 인간 대비 50% 이하로 유지.
+- **경제적 ROI**: 투입된 LLM 비용 대비 절감된 개발 공수(Man-hour) 가치가 3배 이상 달성.
+- **에이전트 가동률 (Utilization)**: 전체 업무 시간 중 에이전트가 활발히 작업을 수행하는 비율 80% 이상.
+
+### 11.2 정성적 지표 (Qualitative Metrics)
+- **개발자 만족도**: 반복적인 버그 수정 업무에서 해방된 개발자들의 창의적 업무 집중도 향상.
+- **코드 일관성**: 모든 에이전트가 동일한 6-Gate 기준을 따름으로써 프로젝트 전체의 코드 품질 상향 평준화.
+- **지식 자산화**: 에이전트의 작업 로그와 결정 과정을 통해 프로젝트 히스토리가 자동으로 문서화됨.
+
+---
+
+## 12. 에이전트 협업 모델 (Agent Collaboration Model)
+
+### 12.1 Git DAG 기반 협업
+Agenthub는 Git의 Directed Acyclic Graph(DAG) 구조를 활용하여 여러 에이전트가 동시에 작업할 수 있는 환경을 제공합니다.
+- **분기(Branching)**: 각 에이전트는 이슈 할당 시 최신 커밋(Leaf)에서 자신만의 분기를 생성합니다.
+- **병합(Merging)**: 작업 완료 후 Agenthub에 푸시할 때, 다른 에이전트의 최신 변경 사항을 자동으로 감지하고 병합을 시도합니다.
+- **충돌 해결(Conflict Resolution)**: 자동 병합 실패 시, Symphony는 해당 이슈를 "Manual Review" 상태로 변경하고 인간 개발자에게 알림을 보냅니다.
+
+### 12.2 메시지 보드를 통한 상태 공유
+에이전트들은 Agenthub의 채널 시스템을 통해 서로의 상태를 공유합니다.
+- **`factory-log` 채널**: 전체 워크플로우의 주요 이벤트(이슈 할당, 푸시 성공, 게이트 실패 등)가 기록됩니다.
+- **`agent-sync` 채널**: 에이전트들이 현재 수정 중인 파일 목록을 공유하여 잠재적인 충돌을 사전에 방지합니다.
+
+---
+
+## 13. 부록: 설정 스키마 (Appendix: Config Schemas)
+
+### 12.1 Agenthub DB Schema (SQLite)
+```sql
+CREATE TABLE gate_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    commit_hash TEXT NOT NULL,
+    gate_name TEXT NOT NULL,
+    status TEXT CHECK(status IN ('PASSED', 'FAILED')) NOT NULL,
+    output TEXT,
+    duration_ms INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_wallets (
+    agent_id TEXT PRIMARY KEY,
+    balance REAL DEFAULT 0.0,
+    total_earned REAL DEFAULT 0.0,
+    total_spent REAL DEFAULT 0.0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### 12.2 Economic SDK Ledger Entry (JSONL)
+```json
+{"timestamp": "2026-03-11T10:00:00Z", "agent_id": "agent-001", "type": "expense", "amount": 0.05, "reason": "gpt-4o-call", "issue_id": "ENG-123"}
+{"timestamp": "2026-03-11T10:15:00Z", "agent_id": "agent-001", "type": "income", "amount": 5.00, "reason": "pr-merge-bonus", "issue_id": "ENG-123", "quality_score": 0.95}
+```
+
+---
+
+## 14. 결론 (Conclusion)
+
+본 "자율 소프트웨어 팩토리" 프로젝트는 AI 에이전트가 단순한 보조 도구를 넘어 독립적인 개발 주체로 거듭나는 전환점이 될 것입니다. Symphony의 정교한 오케스트레이션, Agenthub의 안정적인 버전 관리, Harness의 엄격한 품질 검증, 그리고 Economic SDK의 투명한 경제 시스템이 결합되어, 지속 가능하고 신뢰할 수 있는 소프트웨어 생산 생태계를 구축할 것입니다.
+
+우리는 이 시스템을 통해 개발자들이 반복적이고 소모적인 작업에서 벗어나 더 가치 있고 창의적인 문제 해결에 집중할 수 있는 미래를 꿈꿉니다. 2주간의 집중적인 스프린트를 통해 MVP를 성공적으로 구축하고, 이를 바탕으로 전 세계 소프트웨어 개발 프로세스의 혁신을 이끌어 나갈 것입니다.
+
+---
+**작성자**: Antigravity (Google Deepmind Advanced Agentic Coding Team)
+**최종 수정일**: 2026-03-11
+**문서 버전**: 1.1.0
