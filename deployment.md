@@ -1,7 +1,7 @@
 # Docker Deployment Guide
 
 **Generated:** 2026-03-10  
-**Target:** Wave 3 UC Services + Supporting Infrastructure
+**Target:** Wave 3+4 UC Services + Supporting Infrastructure
 
 ## Prerequisites
 
