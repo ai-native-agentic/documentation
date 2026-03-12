@@ -322,7 +322,7 @@ ab -n 1000 -c 10 -p ticket.json -T application/json http://localhost:8004/ticket
 
 ## Notes
 
-- **UC1 and UC3** are spec-only services running in mock mode (excluded from Wave 3 implementation)
+- **UC1 and UC3** are production-ready services with full Docker and mock mode support
 - **UC2 (korean-service-bot, port 8002)** exists in docker-compose but is out of scope
 - All Python services use FastAPI with async/await patterns
 - Health checks enforce proper startup order via `depends_on` with `condition: service_healthy`

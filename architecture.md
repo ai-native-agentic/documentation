@@ -44,8 +44,8 @@ graph TD
 
 | UC | Project | Port | Status | Purpose |
 |----|---------|------|--------|---------|
-| UC1 | agent-registry-service | 8001 | Spec-only | Agent discovery and capability registry |
-| UC3 | enterprise-gateway | 8003 | Spec-only | Enterprise SSO and policy enforcement |
+| UC1 | agent-registry-service | 8001 | Production-ready | Agent discovery and capability registry |
+| UC3 | enterprise-gateway | 8003 | Production-ready | Enterprise SSO and policy enforcement |
 | UC4 | multichannel-support-platform | 8004 | Production-ready | AI support responder + Slack/Telegram/Email bridges |
 | UC5 | ai-gig-marketplace | 8005 | Production-ready | Real-time gig auction with WebSocket bidding |
 | UC6 | ondevice-ai-assistant | 8006 | Production-ready | On-device inference with Ollama backend |
@@ -61,8 +61,8 @@ graph TD
 
 | Service | Language | Framework | Key Dependencies | Tests |
 |---------|----------|-----------|------------------|-------|
-| UC1: agent-registry-service | Python 3.10+ | FastAPI | Pydantic, asyncio | Mock mode |
-| UC3: enterprise-gateway | Python 3.10+ | FastAPI | Pydantic, asyncio | Mock mode |
+| UC1: agent-registry-service | Python 3.10+ | FastAPI | Pydantic, asyncio | 21 tests, 79.62% cov |
+| UC3: enterprise-gateway | Python 3.10+ | FastAPI | Pydantic, asyncio | 38 tests, 77.71% cov |
 | UC4: multichannel-support-platform | Python 3.10+ | FastAPI | WebSocket, asyncio | 26 tests |
 | UC5: ai-gig-marketplace | Python 3.10+ | FastAPI | WebSocket, asyncio | 21 tests |
 | UC6: ondevice-ai-assistant | Python 3.10+ | FastAPI | Ollama, asyncio | 19 tests |
@@ -139,13 +139,13 @@ ENTERPRISE_URL=http://enterprise-gateway:8003
 
 - **Total tests**: 9,100+ across ecosystem
 - **Pass rate**: 99.8%
-- **Wave 3 UC services**: 134 tests (26+21+19+21+26+21)
+- **Wave 3+4 UC services**: 327 tests
 - **Code coverage**: Production-ready services have comprehensive test suites
 - **Economic validation**: $19K earned in 8 hours (ClawWork benchmark)
 
 ## Notes
 
-- UC1 and UC3 are spec-only services running in mock mode (excluded from Wave 3 implementation)
+- UC1 and UC3 are production-ready services (hardened in Wave 4 with Dockerfiles, mock mode, and 70%+ coverage)
 - UC2 (korean-service-bot, port 8002) exists in docker-compose but is out of scope for this architecture
 - All Python services follow org-wide conventions: ruff lint, black/ruff format, mypy types, pytest markers
 - Symphony (UC10) is the only Elixir service, using OTP 28 and Phoenix framework
