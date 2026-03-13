@@ -12,16 +12,9 @@ Stack: Markdown documentation
 
 ## STRUCTURE
 
-```
-.
-├── README.md                                # Documentation index
-├── VALIDATION_REPORT.md                     # Primary: 12-project validation
-├── INSTALLATION_VERIFICATION_REPORT.md      # Installation + dependencies
-├── FUNCTIONAL_TEST_REPORT.md                # Feature testing results
-├── UNIFIED_TEST_REPORT.md                   # Consolidated test suite analysis
-├── INTEGRATION_ROADMAP.md                   # 3/6/12-month integration plan
-└── HARNESS_INTEGRATION.md                   # 6-Gate QA system status
-```
+documentation/
+├── AGENTS.md
+├── README.md
 
 ## WHERE TO LOOK
 
