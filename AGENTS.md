@@ -13,8 +13,27 @@ Stack: Markdown documentation
 ## STRUCTURE
 
 documentation/
-├── AGENTS.md
-├── README.md
+├── AGENTS.md                    # This file - knowledge base
+├── README.md                    # Documentation index
+├── VALIDATION_REPORT.md         # Primary validation (2026-03-09)
+├── INSTALLATION_VERIFICATION_REPORT.md
+├── FUNCTIONAL_TEST_REPORT.md
+├── FUNCTIONAL_VERIFICATION_REPORT.md
+├── UNIFIED_TEST_REPORT.md
+├── INTEGRATION_ROADMAP.md       # 3/6/12-month roadmap
+├── HARNESS_INTEGRATION.md       # 6-Gate QA system
+├── DEPENDENCY_MAP.md            # Cross-project dependencies
+├── ECOSYSTEM_COMPARATIVE_ANALYSIS.md
+├── SERVICE_PLANNING_USECASES.md
+├── SESSION_RESULTS.md
+├── UC1_autonomous_software_factory.md
+├── UC2_ai_agent_marketplace.md
+├── UC3_autonomous_ml_research_lab.md
+├── UC4_korean_market_ai_platform.md
+├── UC5_enterprise_ai_ops.md
+├── api-flow.md                  # API architecture
+├── architecture.md              # System architecture
+└── deployment.md                # Deployment guide
 
 ## WHERE TO LOOK
 
@@ -24,9 +43,17 @@ documentation/
 | Production readiness | `VALIDATION_REPORT.md` | 9/12 projects ready, 3 need fixes |
 | Installation status | `INSTALLATION_VERIFICATION_REPORT.md` | All 12 installable, dependencies verified |
 | Feature testing | `FUNCTIONAL_TEST_REPORT.md` | Core features operational |
+| Feature verification | `FUNCTIONAL_VERIFICATION_REPORT.md` | Detailed feature analysis |
 | Test statistics | `UNIFIED_TEST_REPORT.md` | 9,000+ tests, 99.8% pass rate |
 | Integration strategy | `INTEGRATION_ROADMAP.md` | 3/6/12-month roadmap |
 | QA gates | `HARNESS_INTEGRATION.md` | 6-Gate system, 7 projects integrated |
+| Dependencies | `DEPENDENCY_MAP.md` | Cross-project dependency graph |
+| Comparative analysis | `ECOSYSTEM_COMPARATIVE_ANALYSIS.md` | Project comparison matrix |
+| Service use cases | `SERVICE_PLANNING_USECASES.md` | Planned services |
+| Use case specs | `UC*.md` | 5 detailed use case specifications |
+| API architecture | `api-flow.md` | API design and flow |
+| System architecture | `architecture.md` | Overall architecture |
+| Deployment guide | `deployment.md` | Production deployment |
 | Navigation | `README.md` | Documentation index + quick links |
 
 ## CONVENTIONS
